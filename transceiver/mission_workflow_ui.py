@@ -763,18 +763,24 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self.results_table.bind("<Button-3>", self._on_results_table_context_menu, add="+")
         self.results_table.bind("<Control-Button-1>", self._on_results_table_context_menu, add="+")
         self.results_table_context_menu = tk.Menu(self.results_table, tearoff=False)
-        self._results_context_move_up_index = 0
+        self._results_context_review_index = 0
+        self.results_table_context_menu.add_command(
+            label="Measurement Review öffnen",
+            command=self._open_review_for_selected_result,
+        )
+        self.results_table_context_menu.add_separator()
+        self._results_context_move_up_index = 2
         self.results_table_context_menu.add_command(
             label="Markierte Einträge nach oben verschieben",
             command=self._move_selected_results_up,
         )
-        self._results_context_move_down_index = 1
+        self._results_context_move_down_index = 3
         self.results_table_context_menu.add_command(
             label="Markierte Einträge nach unten verschieben",
             command=self._move_selected_results_down,
         )
         self.results_table_context_menu.add_separator()
-        self._results_context_remove_index = 3
+        self._results_context_remove_index = 5
         self.results_table_context_menu.add_command(
             label="Markierte Einträge entfernen",
             command=self._remove_selected_results,
@@ -1767,6 +1773,11 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         menu = self.results_table_context_menu
         selected_indices = self._selected_result_row_indices()
         menu.entryconfigure(
+            self._results_context_review_index,
+            label="Measurement Review öffnen",
+            state="normal" if len(selected_indices) == 1 else "disabled",
+        )
+        menu.entryconfigure(
             self._results_context_move_up_index,
             label=self._move_results_context_label(selected_count, direction="up"),
             state=(
@@ -1913,6 +1924,12 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 )
             )
         return tuple(idx for idx in getattr(self, "_selected_result_indices", ()) if 0 <= idx < len(self._records))
+
+    def _open_review_for_selected_result(self) -> None:
+        selected_indices = self._selected_result_row_indices()
+        if len(selected_indices) != 1:
+            return
+        self._open_review_for_result_row(selected_indices[0])
 
     def _remove_selected_results(self) -> None:
         selected_indices = self._selected_result_row_indices()
