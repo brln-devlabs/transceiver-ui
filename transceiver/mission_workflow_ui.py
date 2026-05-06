@@ -2798,14 +2798,17 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         offset_x, offset_y = self._map_preview_offset
         start_x = start_map_pixel[0] * scale_x + offset_x
         start_y = start_map_pixel[1] * scale_y + offset_y
+        preview_scale = max(scale_x, scale_y)
+        lidar_beam_width = max(2, min(4, int(round(2.0 * max(1.0, preview_scale)))))
+        lidar_hit_marker_radius = max(2.0, min(4.0, lidar_beam_width + 0.5))
         self.map_preview_canvas.create_oval(
             start_x - 5,
             start_y - 5,
             start_x + 5,
             start_y + 5,
-            fill="#90caf9",
-            outline="#1565c0",
-            width=1,
+            fill="#212121",
+            outline="#ffffff",
+            width=2,
         )
         angle_min = float(scan["angle_min"])
         angle_increment = float(scan["angle_increment"])
@@ -2861,9 +2864,17 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 start_y,
                 end_x,
                 end_y,
-                fill="#4fc3f7",
+                fill="#ffb300",
+                width=lidar_beam_width,
+            )
+            self.map_preview_canvas.create_oval(
+                end_x - lidar_hit_marker_radius,
+                end_y - lidar_hit_marker_radius,
+                end_x + lidar_hit_marker_radius,
+                end_y + lidar_hit_marker_radius,
+                fill="#fff176",
+                outline="#5d4037",
                 width=1,
-                stipple="gray25",
             )
             drawn_beam_count += 1
         self._append_validation(
