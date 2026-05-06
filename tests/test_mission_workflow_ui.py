@@ -355,8 +355,20 @@ class _TreeviewSelectionStub:
     def selection(self) -> tuple[str, ...]:
         return self._selected
 
+    def selection_set(self, item_id: str) -> None:
+        self._selected = (item_id,)
+
     def index(self, item_id: str) -> int:
         return self._indices[item_id]
+
+    def get_children(self) -> tuple[str, ...]:
+        return tuple(sorted(self._indices, key=self._indices.__getitem__))
+
+    def delete(self, *item_ids: str) -> None:
+        for item_id in item_ids:
+            self._indices.pop(item_id, None)
+            self._selected = tuple(selected for selected in self._selected if selected != item_id)
+        self._indices = {item_id: index for index, item_id in enumerate(self.get_children())}
 
     def identify_row(self, _y: int) -> str:
         return self._row_id
@@ -424,6 +436,96 @@ def test_on_results_table_click_on_empty_region_preserves_multiselect() -> None:
     assert window._selected_result_indices == (0, 1)
     assert window._selected_result_index == 0
     assert window.results_selection_diagnostics_var.value == "Auswahl: 2 Zeilen"
+
+
+class _ResultsContextMenuStub:
+    def __init__(self) -> None:
+        self.labels: list[str] = []
+        self.popup_calls: list[tuple[int, int]] = []
+        self.release_count = 0
+
+    def entryconfigure(self, _index: int, *, label: str) -> None:
+        self.labels.append(label)
+
+    def tk_popup(self, x_root: int, y_root: int) -> None:
+        self.popup_calls.append((x_root, y_root))
+
+    def grab_release(self) -> None:
+        self.release_count += 1
+
+
+def test_on_results_table_context_menu_keeps_existing_multiselect_for_selected_row() -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    table = _TreeviewSelectionStub()
+    table._row_id = "row-b"
+    table._selected = ("row-a", "row-b")
+    table._indices = {"row-a": 0, "row-b": 1, "row-c": 2}
+    menu = _ResultsContextMenuStub()
+    window.results_table = table
+    window.results_table_context_menu = menu
+    window.results_selection_diagnostics_var = _StringVarStub()
+    window._draw_map_preview = lambda: (_ for _ in ()).throw(AssertionError("must not redraw existing selection"))
+
+    result = window._on_results_table_context_menu(SimpleNamespace(x=5, y=6, x_root=50, y_root=60))
+
+    assert result == "break"
+    assert table.selection() == ("row-a", "row-b")
+    assert menu.labels == ["2 markierte Einträge entfernen"]
+    assert menu.popup_calls == [(50, 60)]
+    assert menu.release_count == 1
+
+
+def test_on_results_table_context_menu_selects_unselected_row() -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    table = _TreeviewSelectionStub()
+    table._row_id = "row-c"
+    table._selected = ("row-a", "row-b")
+    table._indices = {"row-a": 0, "row-b": 1, "row-c": 2}
+    menu = _ResultsContextMenuStub()
+    window.results_table = table
+    window.results_table_context_menu = menu
+    window.results_selection_diagnostics_var = _StringVarStub()
+    draw_calls: list[str] = []
+    window._draw_map_preview = lambda: draw_calls.append("draw")
+
+    result = window._on_results_table_context_menu(SimpleNamespace(x=5, y=6, x_root=50, y_root=60))
+
+    assert result == "break"
+    assert table.selection() == ("row-c",)
+    assert window._selected_result_indices == (2,)
+    assert window._selected_result_index == 2
+    assert window.results_selection_diagnostics_var.value == "Auswahl: 1 Zeilen"
+    assert menu.labels == ["Markierten Eintrag entfernen"]
+    assert draw_calls == ["draw"]
+
+
+def test_remove_selected_results_removes_selected_records_and_persists() -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    table = _TreeviewSelectionStub()
+    table._selected = ("row-a", "row-c")
+    table._indices = {"row-a": 0, "row-b": 1, "row-c": 2}
+    window.results_table = table
+    window._records = [
+        {"global_index": 0},
+        {"global_index": 1},
+        {"global_index": 2},
+    ]
+    window._selected_result_index = 0
+    window._selected_result_indices = (0, 2)
+    window.results_selection_diagnostics_var = _StringVarStub()
+    calls: list[str] = []
+    window._persist_workflow_state = lambda: calls.append("persist")
+    window._update_live_label = lambda: calls.append("live")
+    window._draw_map_preview = lambda: calls.append("draw")
+
+    window._remove_selected_results()
+
+    assert window._records == [{"global_index": 1}]
+    assert table.get_children() == ("row-b",)
+    assert window._selected_result_indices == ()
+    assert window._selected_result_index is None
+    assert window.results_selection_diagnostics_var.value == "Auswahl: 0 Zeilen"
+    assert calls == ["persist", "live", "draw"]
 
 
 def test_on_results_table_double_click_opens_review_for_row() -> None:
@@ -1240,12 +1342,12 @@ def test_confirm_measurement_after_navigation_failure_uses_point_index_in_prompt
     window.after = lambda _delay, callback: callback()
     window._append_validation = messages.append
 
-    def _askyesno(title: str, message: str, parent=None) -> bool:
+    def _askyesnocancel(title: str, message: str, parent=None) -> bool:
         asked["title"] = title
         asked["message"] = message
         return True
 
-    monkeypatch.setattr("transceiver.mission_workflow_ui.messagebox.askyesno", _askyesno)
+    monkeypatch.setattr("transceiver.mission_workflow_ui.messagebox.askyesnocancel", _askyesnocancel)
 
     decision = window._confirm_measurement_after_navigation_failure(
         point_context=SimpleNamespace(

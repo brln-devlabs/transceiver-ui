@@ -729,6 +729,13 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self.results_table.bind("<<TreeviewSelect>>", self._on_results_table_select)
         self.results_table.bind("<Button-1>", self._on_results_table_click, add="+")
         self.results_table.bind("<Double-1>", self._on_results_table_double_click, add="+")
+        self.results_table.bind("<Button-3>", self._on_results_table_context_menu, add="+")
+        self.results_table.bind("<Control-Button-1>", self._on_results_table_context_menu, add="+")
+        self.results_table_context_menu = tk.Menu(self.results_table, tearoff=False)
+        self.results_table_context_menu.add_command(
+            label="Markierte Einträge entfernen",
+            command=self._remove_selected_results,
+        )
         self.results_selection_diagnostics_var = tk.StringVar(value="Auswahl: 0 Zeilen")
         ctk.CTkLabel(
             table_frame,
@@ -1698,6 +1705,60 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         row_index = self.results_table.index(row_id)
         self._open_review_for_result_row(row_index)
         return "break"
+
+    def _on_results_table_context_menu(self, event: tk.Event) -> str | None:
+        row_id = self.results_table.identify_row(event.y)
+        if not row_id:
+            return None
+        selected_items = tuple(self.results_table.selection())
+        if row_id not in selected_items:
+            self.results_table.selection_set(row_id)
+            self._on_results_table_select(event)
+        selected_count = len(self.results_table.selection())
+        if selected_count <= 0:
+            return None
+        menu = self.results_table_context_menu
+        menu.entryconfigure(0, label=self._remove_results_context_label(selected_count))
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+        return "break"
+
+    @staticmethod
+    def _remove_results_context_label(selected_count: int) -> str:
+        if selected_count == 1:
+            return "Markierten Eintrag entfernen"
+        return f"{selected_count} markierte Einträge entfernen"
+
+    def _selected_result_row_indices(self) -> tuple[int, ...]:
+        selected_items = tuple(self.results_table.selection())
+        if selected_items:
+            return tuple(
+                sorted(
+                    idx
+                    for idx in (self.results_table.index(item_id) for item_id in selected_items)
+                    if 0 <= idx < len(self._records)
+                )
+            )
+        return tuple(idx for idx in getattr(self, "_selected_result_indices", ()) if 0 <= idx < len(self._records))
+
+    def _remove_selected_results(self) -> None:
+        selected_indices = self._selected_result_row_indices()
+        if not selected_indices:
+            return
+        children = tuple(self.results_table.get_children())
+        for row_index in reversed(selected_indices):
+            if 0 <= row_index < len(self._records):
+                del self._records[row_index]
+            if 0 <= row_index < len(children):
+                self.results_table.delete(children[row_index])
+        self._selected_result_index = None
+        self._selected_result_indices = ()
+        self._update_results_selection_diagnostics()
+        self._persist_workflow_state()
+        self._update_live_label()
+        self._draw_map_preview()
 
     def _open_review_for_result_row(self, row_index: int) -> None:
         if row_index < 0 or row_index >= len(self._records):
