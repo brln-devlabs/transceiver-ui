@@ -59,9 +59,6 @@ LIDAR_OVERLAY_MAX_BEAMS_PER_CELL = 2
 LIDAR_OVERLAY_SMALL_MAP_REFERENCE_SIZE_PX = 600.0
 LIDAR_OVERLAY_SMALL_MAP_MIN_CELL_FACTOR = 0.35
 LIDAR_OVERLAY_MIN_CELL_SIZE_PX = 1.0
-# LIDAR scans are captured in the sensor frame, whose forward axis is mounted
-# opposite to the map/robot heading used by the mission points.
-LIDAR_OVERLAY_SENSOR_YAW_OFFSET_RAD = math.pi
 MEASUREMENT_START_LIVE_POSITION_WAIT_TIMEOUT_S = 1.6
 MEASUREMENT_START_LIVE_POSITION_WAIT_INTERVAL_S = 0.1
 LIVE_ECHO_CACHE_POSITION_DELTA_M = 0.015
@@ -2845,12 +2842,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             if idx % beam_stride != 0:
                 skipped_by_stride_count += 1
                 continue
-            beam_angle = (
-                point.yaw
-                + LIDAR_OVERLAY_SENSOR_YAW_OFFSET_RAD
-                + angle_min
-                + idx * angle_increment
-            )
+            beam_angle = point.yaw + angle_min + idx * angle_increment
             end_world_x = point.x + math.cos(beam_angle) * distance
             end_world_y = point.y + math.sin(beam_angle) * distance
             end_map_pixel = self._world_to_map_pixel(x=end_world_x, y=end_world_y, image_height=original.height())
