@@ -7665,10 +7665,27 @@ class TransceiverUI(ctk.CTk):
                     outcome["detail"] = detail
                     return
                 if auto_approve:
+                    _highest_idx, detected_los_idx, detected_echo_indices = _classify_visible_xcorr_peaks(
+                        mag,
+                        repetition_period_samples=max(1, int(ctx.get("period_samples") or len(lags) or 1)),
+                    )
+                    if detected_los_idx is None:
+                        detail = "Auto Detect konnte keinen LOS-Peak bestimmen."
+                        outcome["approved"] = False
+                        outcome["reason"] = REVIEW_REASON_NO_DETECTABLE_LOS
+                        outcome["detail"] = detail
+                        return
+                    period_samples = int(ctx.get("period_samples")) if ctx.get("period_samples") is not None else None
+                    filtered_echo_indices = _filter_peak_indices_to_period_group(
+                        lags,
+                        [int(idx) for idx in detected_echo_indices if idx is not None],
+                        int(detected_los_idx),
+                        period_samples,
+                    )
                     interpolation_enabled = bool(self.rx_interpolation_enable.get())
                     interpolation_factor = self._rx_effective_interpolation_factor()
-                    los_idx_final = int(los_idx)
-                    echo_indices_final = [int(idx) for idx in echo_indices]
+                    los_idx_final = int(detected_los_idx)
+                    echo_indices_final = [int(idx) for idx in filtered_echo_indices]
                     los_lag = int(round(float(lags[los_idx_final])))
                     outcome["approved"] = True
                     outcome["reason"] = ""

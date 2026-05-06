@@ -768,19 +768,24 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             label="Measurement Review öffnen",
             command=self._open_review_for_selected_result,
         )
+        self._results_context_auto_detect_index = 1
+        self.results_table_context_menu.add_command(
+            label="Auto Detect anwenden",
+            command=self._auto_detect_selected_results,
+        )
         self.results_table_context_menu.add_separator()
-        self._results_context_move_up_index = 2
+        self._results_context_move_up_index = 3
         self.results_table_context_menu.add_command(
             label="Markierte Einträge nach oben verschieben",
             command=self._move_selected_results_up,
         )
-        self._results_context_move_down_index = 3
+        self._results_context_move_down_index = 4
         self.results_table_context_menu.add_command(
             label="Markierte Einträge nach unten verschieben",
             command=self._move_selected_results_down,
         )
         self.results_table_context_menu.add_separator()
-        self._results_context_remove_index = 5
+        self._results_context_remove_index = 6
         self.results_table_context_menu.add_command(
             label="Markierte Einträge entfernen",
             command=self._remove_selected_results,
@@ -1778,6 +1783,11 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             state="normal" if len(selected_indices) == 1 else "disabled",
         )
         menu.entryconfigure(
+            self._results_context_auto_detect_index,
+            label=self._auto_detect_results_context_label(selected_count),
+            state="normal" if selected_indices else "disabled",
+        )
+        menu.entryconfigure(
             self._results_context_move_up_index,
             label=self._move_results_context_label(selected_count, direction="up"),
             state=(
@@ -1804,6 +1814,12 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         finally:
             menu.grab_release()
         return "break"
+
+    @staticmethod
+    def _auto_detect_results_context_label(selected_count: int) -> str:
+        if selected_count == 1:
+            return "Auto Detect auf markierten Eintrag anwenden"
+        return f"Auto Detect auf {selected_count} markierte Einträge anwenden"
 
     @staticmethod
     def _remove_results_context_label(selected_count: int) -> str:
@@ -1948,18 +1964,60 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._update_live_label()
         self._draw_map_preview()
 
-    def _open_review_for_result_row(self, row_index: int) -> None:
-        if row_index < 0 or row_index >= len(self._records):
+    def _auto_detect_selected_results(self) -> None:
+        selected_indices = self._selected_result_row_indices()
+        if not selected_indices:
             return
+        selected_count = len(selected_indices)
+        message = (
+            "Auto Detect aus dem Measurement Review auf den markierten Eintrag anwenden?"
+            if selected_count == 1
+            else f"Auto Detect aus dem Measurement Review auf {selected_count} markierte Einträge anwenden?"
+        )
+        if not messagebox.askyesno("Auto Detect anwenden", message, parent=self):
+            self._append_validation("ℹ️ Auto Detect wurde abgebrochen; Messresultate bleiben unverändert.")
+            return
+
+        applied_count = 0
+        failed_count = 0
+        for row_index in selected_indices:
+            if self._run_review_for_result_row(row_index, auto_approve=True):
+                applied_count += 1
+            else:
+                failed_count += 1
+        if applied_count:
+            self._persist_workflow_state()
+            for row_index in selected_indices:
+                self._refresh_result_table_row(row_index)
+            self._update_live_label()
+            self._draw_map_preview()
+        self._update_results_selection_diagnostics()
+        if failed_count:
+            self._append_validation(
+                f"⚠️ Auto Detect angewendet: {applied_count} erfolgreich, {failed_count} fehlgeschlagen/übersprungen."
+            )
+        else:
+            self._append_validation(f"✅ Auto Detect auf {applied_count} Ergebnis(se) angewendet.")
+
+    def _open_review_for_result_row(self, row_index: int) -> None:
+        if self._run_review_for_result_row(row_index, auto_approve=False):
+            self._persist_workflow_state()
+            self._refresh_result_table_row(row_index)
+            self._update_results_selection_diagnostics()
+            self._draw_map_preview()
+
+    def _run_review_for_result_row(self, row_index: int, *, auto_approve: bool) -> bool:
+        if row_index < 0 or row_index >= len(self._records):
+            return False
         record = self._records[row_index]
         if not isinstance(record, dict):
-            return
+            return False
         measurement = record.get("measurement")
         if not isinstance(measurement, dict):
-            return
+            return False
         result_payload = measurement.get("result")
         if not isinstance(result_payload, dict):
-            return
+            return False
         output_file = result_payload.get("output_file")
         if (not isinstance(output_file, str) or not output_file.strip()) and isinstance(result_payload.get("file_ref"), str):
             output_file = result_payload.get("file_ref")
@@ -1969,33 +2027,41 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 output_file = rx_payload.get("output_file")
         if not isinstance(output_file, str) or not output_file.strip():
             self._append_validation("⚠️ Review kann nicht geöffnet werden: output_file fehlt.")
-            return
+            return False
         review_fn = getattr(self.master, "review_measurement_for_mission", None)
         if not callable(review_fn):
             self._append_validation("⚠️ Review kann nicht geöffnet werden: Review-Funktion nicht verfügbar.")
-            return
+            return False
         point_label = f"Punktindex {self._format_one_based_index(record.get('global_index'))}"
         review_prefill = self._build_review_prefill_from_result(result_payload)
+        kwargs: dict[str, Any] = {
+            "point_label": point_label,
+            "output_file": output_file,
+            "initial_review": review_prefill,
+        }
+        if auto_approve:
+            kwargs["auto_approve"] = True
         try:
-            review_outcome = review_fn(
-                point_label=point_label,
-                output_file=output_file,
-                initial_review=review_prefill,
-            )
+            review_outcome = review_fn(**kwargs)
         except Exception as exc:
             self._append_validation(f"⚠️ Review konnte nicht geöffnet werden: {exc}")
-            return
+            return False
         if not isinstance(review_outcome, dict):
-            return
+            return False
         if not bool(review_outcome.get("approved")):
-            self._append_validation("ℹ️ Review nicht freigegeben; Messresultat bleibt unverändert.")
-            return
+            action = "Auto Detect" if auto_approve else "Review"
+            self._append_validation(f"ℹ️ {action} nicht freigegeben; Messresultat bleibt unverändert.")
+            return False
 
+        self._apply_review_outcome_to_result(result_payload, review_outcome)
+        return True
+
+    def _apply_review_outcome_to_result(self, result_payload: dict[str, Any], review_outcome: dict[str, Any]) -> None:
         normalized_echo_delays = self._normalize_review_echo_delays(review_outcome)
         if normalized_echo_delays:
             review_outcome["echo_delays"] = normalized_echo_delays
 
-        for key in (
+        review_keys = (
             "manual_lags",
             "los_idx",
             "echo_indices",
@@ -2004,7 +2070,8 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             "echo_delays",
             "interpolation_enabled",
             "interpolation_factor",
-        ):
+        )
+        for key in review_keys:
             if key in review_outcome:
                 result_payload[key] = review_outcome.get(key)
 
@@ -2012,36 +2079,17 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         if not isinstance(review_payload, dict):
             review_payload = {}
             result_payload["review"] = review_payload
-        for key in (
-            "manual_lags",
-            "los_idx",
-            "echo_indices",
-            "los_lag",
-            "echo_lags",
-            "echo_delays",
-            "interpolation_enabled",
-            "interpolation_factor",
-        ):
+        for key in review_keys:
             if key in review_outcome:
                 review_payload[key] = review_outcome.get(key)
 
-        self._persist_workflow_state()
-        if 0 <= row_index < len(self.results_table.get_children()):
-            error_text = record.get("error") or ""
-            combined_status = self._compose_table_outcome(record, error_text)
-            self.results_table.item(
-                self.results_table.get_children()[row_index],
-                values=(
-                    self._format_one_based_index(record.get("global_index")),
-                    self._format_one_based_index(record.get("point_index")),
-                    self._format_live_position_for_table(record),
-                    self._format_live_distance_to_rx_for_table(record),
-                    *self._format_echo_distances_for_table(result_payload.get("echo_delays")),
-                    combined_status,
-                ),
-            )
-        self._update_results_selection_diagnostics()
-        self._draw_map_preview()
+    def _refresh_result_table_row(self, row_index: int) -> None:
+        if not 0 <= row_index < len(self._records):
+            return
+        children = tuple(self.results_table.get_children())
+        if not 0 <= row_index < len(children):
+            return
+        self.results_table.item(children[row_index], values=self._result_table_values(self._records[row_index]))
 
     @staticmethod
     def _normalize_review_echo_delays(review_outcome: dict[str, Any]) -> list[dict[str, Any]]:

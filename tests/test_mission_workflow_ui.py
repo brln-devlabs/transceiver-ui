@@ -466,9 +466,10 @@ def test_on_results_table_context_menu_keeps_existing_multiselect_for_selected_r
     window.results_table = table
     window.results_table_context_menu = menu
     window._results_context_review_index = 0
-    window._results_context_move_up_index = 2
-    window._results_context_move_down_index = 3
-    window._results_context_remove_index = 5
+    window._results_context_auto_detect_index = 1
+    window._results_context_move_up_index = 3
+    window._results_context_move_down_index = 4
+    window._results_context_remove_index = 6
     window._records = [{}, {}, {}]
     window.results_selection_diagnostics_var = _StringVarStub()
     window._draw_map_preview = lambda: (_ for _ in ()).throw(AssertionError("must not redraw existing selection"))
@@ -479,11 +480,12 @@ def test_on_results_table_context_menu_keeps_existing_multiselect_for_selected_r
     assert table.selection() == ("row-a", "row-b")
     assert menu.labels == [
         "Measurement Review öffnen",
+        "Auto Detect auf 2 markierte Einträge anwenden",
         "2 markierte Einträge nach oben verschieben",
         "2 markierte Einträge nach unten verschieben",
         "2 markierte Einträge entfernen",
     ]
-    assert menu.states == ["disabled", "disabled", "normal", None]
+    assert menu.states == ["disabled", "normal", "disabled", "normal", None]
     assert menu.popup_calls == [(50, 60)]
     assert menu.release_count == 1
 
@@ -498,9 +500,10 @@ def test_on_results_table_context_menu_selects_unselected_row() -> None:
     window.results_table = table
     window.results_table_context_menu = menu
     window._results_context_review_index = 0
-    window._results_context_move_up_index = 2
-    window._results_context_move_down_index = 3
-    window._results_context_remove_index = 5
+    window._results_context_auto_detect_index = 1
+    window._results_context_move_up_index = 3
+    window._results_context_move_down_index = 4
+    window._results_context_remove_index = 6
     window._records = [{}, {}, {}]
     window.results_selection_diagnostics_var = _StringVarStub()
     draw_calls: list[str] = []
@@ -515,11 +518,12 @@ def test_on_results_table_context_menu_selects_unselected_row() -> None:
     assert window.results_selection_diagnostics_var.value == "Auswahl: 1 Zeilen"
     assert menu.labels == [
         "Measurement Review öffnen",
+        "Auto Detect auf markierten Eintrag anwenden",
         "Markierten Eintrag nach oben verschieben",
         "Markierten Eintrag nach unten verschieben",
         "Markierten Eintrag entfernen",
     ]
-    assert menu.states == ["normal", "normal", "disabled", None]
+    assert menu.states == ["normal", "normal", "normal", "disabled", None]
     assert draw_calls == ["draw"]
 
 
@@ -539,6 +543,99 @@ def test_open_review_for_selected_result_opens_only_single_selection() -> None:
     window._open_review_for_selected_result()
 
     assert calls == [1]
+
+
+def test_auto_detect_selected_results_confirms_once_and_updates_multiple_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    window._records = [
+        {
+            "global_index": 0,
+            "point_index": 0,
+            "error": "",
+            "measurement": {"status": "succeeded", "result": {"output_file": "a.bin"}},
+        },
+        {
+            "global_index": 1,
+            "point_index": 1,
+            "error": "",
+            "measurement": {"status": "succeeded", "result": {"output_file": "b.bin"}},
+        },
+    ]
+
+    class _DummyResultsTable:
+        def __init__(self) -> None:
+            self.updated: list[tuple[str, tuple[str, ...]]] = []
+
+        def selection(self):  # type: ignore[no-untyped-def]
+            return ()
+
+        def get_children(self):  # type: ignore[no-untyped-def]
+            return ("row-a", "row-b")
+
+        def item(self, item_id, **kwargs):  # type: ignore[no-untyped-def]
+            self.updated.append((item_id, kwargs["values"]))
+
+    table = _DummyResultsTable()
+    window.results_table = table
+    window._selected_result_indices = (0, 1)
+    window._format_live_position_for_table = lambda _payload: "-"
+    window._format_live_distance_to_rx_for_table = lambda _payload: "-"
+    messages: list[str] = []
+    calls: list[dict[str, object]] = []
+    lifecycle: list[str] = []
+    window._append_validation = messages.append
+    window._persist_workflow_state = lambda: lifecycle.append("persist")
+    window._update_live_label = lambda: lifecycle.append("live")
+    window._draw_map_preview = lambda: lifecycle.append("draw")
+    window._update_results_selection_diagnostics = lambda: lifecycle.append("diagnostics")
+    window.master = SimpleNamespace(
+        review_measurement_for_mission=lambda **kwargs: calls.append(kwargs) or {
+            "approved": True,
+            "los_lag": 10,
+            "echo_lags": [25],
+        }
+    )
+    ask_calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "transceiver.mission_workflow_ui.messagebox.askyesno",
+        lambda title, message, parent=None: ask_calls.append((title, message)) or True,
+    )
+
+    window._auto_detect_selected_results()
+
+    assert len(ask_calls) == 1
+    assert "2 markierte Einträge" in ask_calls[0][1]
+    assert [call["auto_approve"] for call in calls] == [True, True]
+    assert [call["output_file"] for call in calls] == ["a.bin", "b.bin"]
+    assert window._records[0]["measurement"]["result"]["echo_delays"] == [
+        {"echo_index": 0, "delta_lag": 15.0, "distance_m": 22.5}
+    ]
+    assert window._records[1]["measurement"]["result"]["echo_delays"] == [
+        {"echo_index": 0, "delta_lag": 15.0, "distance_m": 22.5}
+    ]
+    assert [item_id for item_id, _values in table.updated] == ["row-a", "row-b"]
+    assert lifecycle == ["persist", "live", "draw", "diagnostics"]
+    assert any("Auto Detect" in message for message in messages)
+
+
+def test_auto_detect_selected_results_aborts_when_confirmation_declines(monkeypatch: pytest.MonkeyPatch) -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    window._records = [{"measurement": {"result": {"output_file": "a.bin"}}}]
+    window.results_table = SimpleNamespace(selection=lambda: ())
+    window._selected_result_indices = (0,)
+    messages: list[str] = []
+    calls: list[str] = []
+    window._append_validation = messages.append
+    window.master = SimpleNamespace(review_measurement_for_mission=lambda **_kwargs: calls.append("review"))
+    monkeypatch.setattr(
+        "transceiver.mission_workflow_ui.messagebox.askyesno",
+        lambda *_args, **_kwargs: False,
+    )
+
+    window._auto_detect_selected_results()
+
+    assert calls == []
+    assert any("abgebrochen" in message for message in messages)
 
 
 def test_remove_selected_results_removes_selected_records_and_persists() -> None:
