@@ -441,11 +441,13 @@ def test_on_results_table_click_on_empty_region_preserves_multiselect() -> None:
 class _ResultsContextMenuStub:
     def __init__(self) -> None:
         self.labels: list[str] = []
+        self.states: list[str | None] = []
         self.popup_calls: list[tuple[int, int]] = []
         self.release_count = 0
 
-    def entryconfigure(self, _index: int, *, label: str) -> None:
+    def entryconfigure(self, _index: int, *, label: str, state: str | None = None) -> None:
         self.labels.append(label)
+        self.states.append(state)
 
     def tk_popup(self, x_root: int, y_root: int) -> None:
         self.popup_calls.append((x_root, y_root))
@@ -463,6 +465,11 @@ def test_on_results_table_context_menu_keeps_existing_multiselect_for_selected_r
     menu = _ResultsContextMenuStub()
     window.results_table = table
     window.results_table_context_menu = menu
+    window._results_context_review_index = 0
+    window._results_context_move_up_index = 2
+    window._results_context_move_down_index = 3
+    window._results_context_remove_index = 5
+    window._records = [{}, {}, {}]
     window.results_selection_diagnostics_var = _StringVarStub()
     window._draw_map_preview = lambda: (_ for _ in ()).throw(AssertionError("must not redraw existing selection"))
 
@@ -470,7 +477,13 @@ def test_on_results_table_context_menu_keeps_existing_multiselect_for_selected_r
 
     assert result == "break"
     assert table.selection() == ("row-a", "row-b")
-    assert menu.labels == ["2 markierte Einträge entfernen"]
+    assert menu.labels == [
+        "Measurement Review öffnen",
+        "2 markierte Einträge nach oben verschieben",
+        "2 markierte Einträge nach unten verschieben",
+        "2 markierte Einträge entfernen",
+    ]
+    assert menu.states == ["disabled", "disabled", "normal", None]
     assert menu.popup_calls == [(50, 60)]
     assert menu.release_count == 1
 
@@ -484,6 +497,11 @@ def test_on_results_table_context_menu_selects_unselected_row() -> None:
     menu = _ResultsContextMenuStub()
     window.results_table = table
     window.results_table_context_menu = menu
+    window._results_context_review_index = 0
+    window._results_context_move_up_index = 2
+    window._results_context_move_down_index = 3
+    window._results_context_remove_index = 5
+    window._records = [{}, {}, {}]
     window.results_selection_diagnostics_var = _StringVarStub()
     draw_calls: list[str] = []
     window._draw_map_preview = lambda: draw_calls.append("draw")
@@ -495,8 +513,32 @@ def test_on_results_table_context_menu_selects_unselected_row() -> None:
     assert window._selected_result_indices == (2,)
     assert window._selected_result_index == 2
     assert window.results_selection_diagnostics_var.value == "Auswahl: 1 Zeilen"
-    assert menu.labels == ["Markierten Eintrag entfernen"]
+    assert menu.labels == [
+        "Measurement Review öffnen",
+        "Markierten Eintrag nach oben verschieben",
+        "Markierten Eintrag nach unten verschieben",
+        "Markierten Eintrag entfernen",
+    ]
+    assert menu.states == ["normal", "normal", "disabled", None]
     assert draw_calls == ["draw"]
+
+
+def test_open_review_for_selected_result_opens_only_single_selection() -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    calls: list[int] = []
+    window._records = [{}, {}, {}]
+    window.results_table = SimpleNamespace(selection=lambda: ())
+    window._selected_result_indices = (1,)
+    window._open_review_for_result_row = lambda row_index: calls.append(row_index)
+
+    window._open_review_for_selected_result()
+
+    assert calls == [1]
+
+    window._selected_result_indices = (0, 2)
+    window._open_review_for_selected_result()
+
+    assert calls == [1]
 
 
 def test_remove_selected_results_removes_selected_records_and_persists() -> None:
