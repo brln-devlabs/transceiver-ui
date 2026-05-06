@@ -762,6 +762,17 @@ def test_extract_lidar_ranges_from_scan_text_supports_list_style() -> None:
     assert values[2] == 3.4
 
 
+def test_lidar_overlay_beam_angle_compensates_left_rotated_scanner() -> None:
+    angle = MissionWorkflowWindow._lidar_overlay_beam_angle(
+        point_yaw=0.0,
+        angle_min=0.0,
+        angle_increment=0.0,
+        beam_index=0,
+    )
+
+    assert angle == pytest.approx(math.pi / 2.0)
+
+
 def test_draw_lidar_scan_overlay_deduplicates_dense_endpoints() -> None:
     window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
     window._map_image_original = SimpleNamespace(width=lambda: 200, height=lambda: 120)
