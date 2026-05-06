@@ -1709,6 +1709,91 @@ def _find_echo_marker_slot_near_lag(
     return nearest_slot
 
 
+def _valid_tk_window(window: object | None) -> object | None:
+    """Return a Tk window only when it still exists."""
+    if window is None:
+        return None
+    winfo_exists = getattr(window, "winfo_exists", None)
+    if not callable(winfo_exists):
+        return None
+    try:
+        if not bool(winfo_exists()):
+            return None
+    except Exception:
+        return None
+    return window
+
+
+def _mission_review_qt_parent(qapp: object, workflow_window: object | None) -> object | None:
+    """Resolve the Qt parent for the mission-review dialog.
+
+    The mission workflow is a Tk/CustomTkinter window, so it is intentionally
+    not represented by ``QApplication.activeWindow()``.  While the workflow
+    exists, the Qt dialog must therefore stay parentless on the QWidget side and
+    use the workflow's native window handle as transient parent instead.  Only
+    fall back to arbitrary Qt top-level windows when no workflow window exists.
+    """
+    if workflow_window is not None:
+        return None
+
+    active_window = None
+    active_window_getter = getattr(qapp, "activeWindow", None)
+    if callable(active_window_getter):
+        active_window = active_window_getter()
+    if active_window is not None:
+        return active_window
+
+    top_level_widgets = [
+        widget
+        for widget in QtWidgets.QApplication.topLevelWidgets()
+        if isinstance(widget, QtWidgets.QWidget) and widget.isVisible()
+    ]
+    return top_level_widgets[0] if top_level_widgets else None
+
+
+def _configure_qt_dialog_tk_transient_parent(
+    dialog: QtWidgets.QDialog,
+    workflow_window: object | None,
+) -> bool:
+    """Attach a Qt dialog transiently to an existing Tk workflow window.
+
+    Returns ``True`` when Qt accepted a native transient parent.  The created
+    ``QWindow`` wrapper is kept alive on the dialog for the dialog lifetime.
+    """
+    if workflow_window is None:
+        return False
+    winfo_id = getattr(workflow_window, "winfo_id", None)
+    if not callable(winfo_id):
+        return False
+    try:
+        native_parent_id = int(winfo_id())
+    except Exception as exc:
+        logging.debug("Mission review could not read Tk workflow window handle: %s", exc)
+        return False
+    if native_parent_id <= 0:
+        return False
+
+    try:
+        dialog.winId()
+        qt_window = dialog.windowHandle()
+        if qt_window is None:
+            return False
+        native_parent_window = QtGui.QWindow.fromWinId(native_parent_id)
+        if native_parent_window is None:
+            return False
+        qt_window.setTransientParent(native_parent_window)
+        dialog.setWindowModality(QtCore.Qt.WindowModal)
+        dialog._tk_transient_parent_window = native_parent_window
+        return True
+    except Exception as exc:
+        logging.debug(
+            "Mission review could not attach Qt dialog to Tk workflow window handle %s: %s",
+            native_parent_id,
+            exc,
+        )
+        return False
+
+
 class MissionMeasurementReviewDialog(QtWidgets.QDialog):
     """Blocking review dialog for mission cross-correlation peaks."""
 
@@ -1783,6 +1868,9 @@ class MissionMeasurementReviewDialog(QtWidgets.QDialog):
         button_row.addWidget(confirm_btn)
         layout.addLayout(button_row)
 
+    def attach_tk_transient_parent(self, workflow_window: object | None) -> bool:
+        """Use a Tk workflow window as this Qt dialog's native transient parent."""
+        return _configure_qt_dialog_tk_transient_parent(self, workflow_window)
 
     def _on_auto_detect(self) -> None:
         if self._magnitudes.size == 0 or self._lags.size == 0:
@@ -7536,14 +7624,8 @@ class TransceiverUI(ctk.CTk):
                     ]
                     return
 
-                parent_window = qapp.activeWindow()
-                if parent_window is None:
-                    top_level_widgets = [
-                        widget
-                        for widget in QtWidgets.QApplication.topLevelWidgets()
-                        if isinstance(widget, QtWidgets.QWidget) and widget.isVisible()
-                    ]
-                    parent_window = top_level_widgets[0] if top_level_widgets else None
+                workflow_window = _valid_tk_window(getattr(self, "_mission_workflow_window", None))
+                parent_window = _mission_review_qt_parent(qapp, workflow_window)
                 dialog = MissionMeasurementReviewDialog(
                     parent=parent_window,
                     point_label=point_label,
@@ -7556,6 +7638,8 @@ class TransceiverUI(ctk.CTk):
                     else 1.0,
                     repetition_period_samples=int(ctx.get("period_samples")) if ctx.get("period_samples") is not None else None,
                 )
+                if workflow_window is not None:
+                    dialog.attach_tk_transient_parent(workflow_window)
                 dialog.raise_()
                 dialog.activateWindow()
                 logging.info(
@@ -7565,8 +7649,7 @@ class TransceiverUI(ctk.CTk):
                     outcome.get("detail", ""),
                 )
                 dialog_result = dialog.exec()
-                workflow_window = getattr(self, "_mission_workflow_window", None)
-                if workflow_window is not None and workflow_window.winfo_exists():
+                if workflow_window is not None:
                     workflow_window.deiconify()
                     workflow_window.lift()
                     workflow_window.after_idle(workflow_window.focus_force)
