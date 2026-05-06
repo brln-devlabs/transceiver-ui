@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import math
 import threading
 import time
@@ -67,6 +68,8 @@ class PointExecutionContext:
     point_index: int
     global_index: int
     point: MeasurementPoint
+    measurement_index: int = 0
+    measurements_per_point: int = 1
 
 
 class CallableMeasurementService:
@@ -107,7 +110,19 @@ class JsonRunLogStore:
         point = payload["point"]
         global_index = payload.get("global_index", 0)
         point_id = point.get("id") or point.get("name") or f"point-{global_index}"
-        filename = f"point-{global_index:04d}-{_sanitize_filename(str(point_id))}.json"
+        measurement_index = payload.get("measurement_index")
+        measurement_suffix = (
+            f"-measurement-{measurement_index + 1:02d}"
+            if (
+                isinstance(measurement_index, int)
+                and payload.get("measurements_per_point", 1) != 1
+            )
+            else ""
+        )
+        filename = (
+            f"point-{global_index:04d}-"
+            f"{_sanitize_filename(str(point_id))}{measurement_suffix}.json"
+        )
         (self.directory / filename).write_text(
             json.dumps(payload, indent=2, ensure_ascii=False),
             encoding="utf-8",
@@ -132,6 +147,7 @@ class MeasurementRunExecutorConfig:
     start_point_index: int = 0
     reverse_point_order: bool = False
     enable_measurements: bool = True
+    measurements_per_point: int = 1
     confirm_measurement_after_navigation_failure: (
         Callable[[PointExecutionContext, TerminalNavigationState], bool | str] | None
     ) = None
@@ -185,6 +201,7 @@ class MeasurementRunExecutor:
         self.run_log_store = run_log_store
         self.on_runtime_event = on_runtime_event
         self.config = config or MeasurementRunExecutorConfig()
+        self._validate_measurements_per_point()
         self._validate_start_point_index()
 
         self._state: ExecutorState = "idle"
@@ -386,11 +403,8 @@ class MeasurementRunExecutor:
         attempt = 0
         while attempt < attempts:
             attempt += 1
-            nav_state = self.navigator.navigate_to_point(
-                self._to_navigation_point(
-                    point, rotate_heading_by_pi=self.config.reverse_point_order
-                ),
-                timeout_s=self.config.goal_reached_timeout_s,
+            nav_state = self._navigate_to_point(
+                point,
                 on_navigation_event=_emit_navigation_event,
             )
             if nav_state == "succeeded":
@@ -431,11 +445,8 @@ class MeasurementRunExecutor:
                     proceed_with_measurement = False
                     retry_navigation = False
             if not self._cancel_requested and retry_navigation:
-                nav_state = self.navigator.navigate_to_point(
-                    self._to_navigation_point(
-                        point, rotate_heading_by_pi=self.config.reverse_point_order
-                    ),
-                    timeout_s=self.config.goal_reached_timeout_s,
+                nav_state = self._navigate_to_point(
+                    point,
                     on_navigation_event=_emit_navigation_event,
                 )
                 attempt += 1
@@ -533,7 +544,59 @@ class MeasurementRunExecutor:
             )
 
         try:
-            measurement_result = self.measurement_service.trigger(point_context)
+            measurement_results: list[dict[str, Any]] = []
+            for measurement_index in range(self.config.measurements_per_point):
+                if measurement_index > 0 and not self._wait_until_resumed_or_stopped():
+                    record = PointExecutionRecord(
+                        index=global_index,
+                        point_id=point.id,
+                        point_name=point.name,
+                        status="skipped",
+                        navigation_state="canceled",
+                        navigation_attempts=attempt,
+                        measurement_result=None,
+                        error="run_cancelled.manual_stop",
+                    )
+                    self._persist_point_log(
+                        point=point,
+                        point_index=point_index,
+                        cycle=cycle,
+                        global_index=global_index,
+                        navigation_state="canceled",
+                        navigation_attempts=attempt,
+                        point_started_at=point_started_at,
+                        measurement_result=None,
+                        measurement_status="skipped",
+                        error=record.error,
+                        navigation_duration_s=max(0.0, navigation_done_at - point_started_at),
+                        measurement_index=measurement_index,
+                    )
+                    return record
+                point_context = PointExecutionContext(
+                    mission_name=self.mission.name,
+                    cycle=cycle,
+                    point_index=point_index,
+                    global_index=global_index,
+                    point=point,
+                    measurement_index=measurement_index,
+                    measurements_per_point=self.config.measurements_per_point,
+                )
+                measurement_result = self.measurement_service.trigger(point_context)
+                measurement_results.append(measurement_result)
+                self._persist_point_log(
+                    point=point,
+                    point_index=point_index,
+                    cycle=cycle,
+                    global_index=global_index,
+                    navigation_state=nav_state,
+                    navigation_attempts=attempt,
+                    point_started_at=point_started_at,
+                    measurement_result=measurement_result,
+                    measurement_status="succeeded",
+                    error=None,
+                    navigation_duration_s=max(0.0, navigation_done_at - point_started_at),
+                    measurement_index=measurement_index,
+                )
         except Exception as exc:
             error_code = str(exc)
             review_reason: str | None = None
@@ -577,22 +640,18 @@ class MeasurementRunExecutor:
                 measurement_status="failed",
                 error=record.error,
                 navigation_duration_s=max(0.0, navigation_done_at - point_started_at),
+                measurement_index=getattr(point_context, "measurement_index", 0),
             )
             return record
 
-        self._persist_point_log(
-            point=point,
-            point_index=point_index,
-            cycle=cycle,
-            global_index=global_index,
-            navigation_state=nav_state,
-            navigation_attempts=attempt,
-            point_started_at=point_started_at,
-            measurement_result=measurement_result,
-            measurement_status="succeeded",
-            error=None,
-            navigation_duration_s=max(0.0, navigation_done_at - point_started_at),
-        )
+        aggregate_measurement_result: dict[str, Any]
+        if len(measurement_results) == 1:
+            aggregate_measurement_result = measurement_results[0]
+        else:
+            aggregate_measurement_result = {
+                "measurements_per_point": self.config.measurements_per_point,
+                "measurements": measurement_results,
+            }
 
         return PointExecutionRecord(
             index=global_index,
@@ -601,8 +660,40 @@ class MeasurementRunExecutor:
             status="succeeded",
             navigation_state=nav_state,
             navigation_attempts=attempt,
-            measurement_result=measurement_result,
+            measurement_result=aggregate_measurement_result,
             error=None,
+        )
+
+    def _navigate_to_point(
+        self,
+        point: MeasurementPoint,
+        *,
+        on_navigation_event: Callable[[dict[str, Any]], None] | None,
+    ) -> TerminalNavigationState:
+        navigation_point = self._to_navigation_point(
+            point, rotate_heading_by_pi=self.config.reverse_point_order
+        )
+        navigate_to_point = self.navigator.navigate_to_point
+        try:
+            signature = inspect.signature(navigate_to_point)
+            accepts_runtime_events = (
+                "on_navigation_event" in signature.parameters
+                or any(
+                    parameter.kind == inspect.Parameter.VAR_KEYWORD
+                    for parameter in signature.parameters.values()
+                )
+            )
+        except (TypeError, ValueError):
+            accepts_runtime_events = True
+        if accepts_runtime_events:
+            return navigate_to_point(
+                navigation_point,
+                timeout_s=self.config.goal_reached_timeout_s,
+                on_navigation_event=on_navigation_event,
+            )
+        return navigate_to_point(
+            navigation_point,
+            timeout_s=self.config.goal_reached_timeout_s,
         )
 
     def _emit_runtime_event(self, payload: dict[str, Any]) -> None:
@@ -627,6 +718,7 @@ class MeasurementRunExecutor:
         measurement_result: dict[str, Any] | None,
         measurement_status: str,
         error: str | None,
+        measurement_index: int = 0,
     ) -> None:
         point_ended_at = time.time()
         measurement_payload = deepcopy(measurement_result)
@@ -664,6 +756,8 @@ class MeasurementRunExecutor:
                 "timeout_s": self.config.goal_reached_timeout_s,
                 "duration_s": navigation_duration_s,
             },
+            "measurement_index": measurement_index,
+            "measurements_per_point": self.config.measurements_per_point,
             "measurement": {
                 "status": measurement_status,
                 "id": _extract_measurement_id(measurement_payload),
@@ -699,6 +793,7 @@ class MeasurementRunExecutor:
             "expected_points": expected_points,
             "start_point_index": self.config.start_point_index,
             "reverse_point_order": self.config.reverse_point_order,
+            "measurements_per_point": self.config.measurements_per_point,
             "succeeded_points": succeeded,
             "failed_points": failed,
             "skipped_points": skipped,
@@ -710,6 +805,10 @@ class MeasurementRunExecutor:
             self.persist_run_summary(summary)
         if self.run_log_store is not None:
             self.run_log_store.write_run_summary(summary)
+
+    def _validate_measurements_per_point(self) -> None:
+        if self.config.measurements_per_point < 1:
+            raise ValueError("measurements_per_point must be >= 1")
 
     def _validate_start_point_index(self) -> None:
         if self.config.start_point_index < 0:

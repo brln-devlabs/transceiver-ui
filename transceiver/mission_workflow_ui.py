@@ -86,6 +86,14 @@ def _save_json_dict(path: Path, payload: dict[str, Any]) -> None:
         return
 
 
+def _parse_positive_int(value: Any, *, default: int = 1) -> int:
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed >= 1 else default
+
+
 def _map_executor_state_to_ui_text(state: str, completion_substatus: str | None = None) -> str:
     mapping = {
         "completed": "Abgeschlossen",
@@ -341,6 +349,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self.lidar_reference_enabled_var = tk.BooleanVar(value=True)
         self.manual_review_enabled_var = tk.BooleanVar(value=True)
         self.test_run_enabled_var = tk.BooleanVar(value=False)
+        self.measurements_per_point_var = tk.StringVar(value="1")
         self.manual_navigation_enabled_var = tk.BooleanVar(value=False)
         self.live_pose_stream_enabled_var = tk.BooleanVar(value=False)
         self.live_preview_enabled_var = tk.BooleanVar(value=False)
@@ -583,9 +592,9 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
 
         controls = ctk.CTkFrame(side_panel)
         controls.grid(row=2, column=0, sticky="ew", padx=0, pady=0)
-        for col in range(5):
+        for col in range(6):
             controls.columnconfigure(col, weight=0)
-        controls.columnconfigure(4, weight=1)
+        controls.columnconfigure(5, weight=1)
         controls.rowconfigure(3, weight=1)
 
         ctk.CTkLabel(controls, text="5) Laufsteuerung").grid(row=0, column=0, columnspan=5, sticky="w", padx=8, pady=(8, 4))
@@ -612,6 +621,15 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             command=lambda _value: self._persist_workflow_state(),
         )
         self.start_point_combo.grid(row=1, column=3, columnspan=2, padx=(0, 8), pady=(0, 4), sticky="w")
+        measurements_frame = ctk.CTkFrame(controls, fg_color="transparent")
+        measurements_frame.grid(row=1, column=5, padx=(10, 8), pady=(0, 4), sticky="w")
+        ctk.CTkLabel(measurements_frame, text="Messungen/Punkt").grid(row=0, column=0, padx=(0, 4), sticky="e")
+        ctk.CTkEntry(
+            measurements_frame,
+            textvariable=self.measurements_per_point_var,
+            width=56,
+            validatecommand=(self.register(self._validate_positive_integer_input), "%P"),
+        ).grid(row=0, column=1, sticky="w")
         self.reverse_point_order_var = tk.BooleanVar(value=False)
         ctk.CTkCheckBox(
             controls,
@@ -767,6 +785,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._mission_points: list[MeasurementPoint] = []
         self.mission_name_var.trace_add("write", lambda *_args: self._persist_workflow_state())
         self.repeat_var.trace_add("write", lambda *_args: self._persist_workflow_state())
+        self.measurements_per_point_var.trace_add("write", lambda *_args: self._persist_workflow_state())
         self._refresh_start_point_options()
         self._refresh_map_section()
         self._refresh_review_ready_indicator()
@@ -1797,8 +1816,17 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             error_text = f"{error_text}: {review_detail}" if error_text else review_detail
         combined_status = self._compose_table_outcome(payload, error_text)
         echo_distances = self._format_echo_distances_for_table(result.get("echo_delays"))
+        measurement_label = self._format_one_based_index(payload.get("global_index"))
+        measurement_index = payload.get("measurement_index")
+        measurements_per_point = payload.get("measurements_per_point")
+        if (
+            isinstance(measurement_index, int)
+            and isinstance(measurements_per_point, int)
+            and measurements_per_point > 1
+        ):
+            measurement_label = f"{measurement_label}.{measurement_index + 1}"
         return (
-            self._format_one_based_index(payload.get("global_index")),
+            measurement_label,
             self._format_one_based_index(payload.get("point_index")),
             self._format_live_position_for_table(payload),
             self._format_live_distance_to_rx_for_table(payload),
@@ -3286,6 +3314,9 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             "repeat": repeat,
             "points": [self._serialize_point(point) for point in self._mission_points],
             "start_point_index": self._selected_start_point_index(),
+            "measurements_per_point": _parse_positive_int(
+                self.measurements_per_point_var.get(), default=1
+            ),
             "map_config_file": self._selected_map_config_file,
             "rx_antenna_global_position": self._serialize_rx_antenna_global_position(),
             "lidar_reference_enabled": bool(self.lidar_reference_enabled_var.get()),
@@ -3375,6 +3406,9 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             self.lidar_reference_enabled_var.set(bool(payload.get("lidar_reference_enabled", True)))
             self.manual_review_enabled_var.set(bool(payload.get("manual_review_enabled", True)))
             self.test_run_enabled_var.set(bool(payload.get("test_run_enabled", False)))
+            self.measurements_per_point_var.set(
+                str(_parse_positive_int(payload.get("measurements_per_point", 1), default=1))
+            )
             self.manual_navigation_enabled_var.set(bool(payload.get("manual_navigation_enabled", False)))
             self.reverse_point_order_var.set(bool(payload.get("reverse_point_order", False)))
             self.live_pose_stream_enabled_var.set(bool(payload.get("live_pose_stream_enabled", False)))
@@ -3489,6 +3523,9 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             )
             self._append_validation("❌ Run-Start blockiert: " + " | ".join(reasons))
             return
+        measurements_per_point = _parse_positive_int(self.measurements_per_point_var.get(), default=1)
+        if self.measurements_per_point_var.get().strip() != str(measurements_per_point):
+            self.measurements_per_point_var.set(str(measurements_per_point))
         test_run_enabled = self._is_test_run_enabled()
         if not test_run_enabled and not self._ensure_transmitter_before_run():
             return
@@ -3550,6 +3587,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 start_point_index=start_point_index,
                 reverse_point_order=bool(self.reverse_point_order_var.get()),
                 enable_measurements=not test_run_enabled,
+                measurements_per_point=measurements_per_point,
                 confirm_measurement_after_navigation_failure=self._confirm_measurement_after_navigation_failure,
             ),
         )
