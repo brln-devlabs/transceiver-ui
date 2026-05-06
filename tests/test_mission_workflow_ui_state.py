@@ -202,3 +202,11 @@ def test_save_and_load_json_dict_preserves_mission_result_records(tmp_path) -> N
     loaded = _load_json_dict(state_file)
 
     assert loaded["records"] == payload["records"]
+
+
+def test_parse_positive_int_defaults_invalid_measurements_per_point() -> None:
+    from transceiver.mission_workflow_ui import _parse_positive_int
+
+    assert _parse_positive_int("3", default=1) == 3
+    assert _parse_positive_int("0", default=1) == 1
+    assert _parse_positive_int("invalid", default=1) == 1

@@ -191,9 +191,14 @@ class MissionRxMeasurementService:
     def trigger(self, point_context: PointExecutionContext) -> dict[str, Any]:
         self._on_status("measurement", "running")
         timestamp = datetime.now(timezone.utc)
+        measurement_suffix = (
+            f"-measurement-{point_context.measurement_index + 1:02d}"
+            if point_context.measurements_per_point > 1
+            else ""
+        )
         filename = (
-            f"point-{point_context.global_index:04d}-"
-            f"{timestamp.strftime('%Y%m%d-%H%M%S')}.bin"
+            f"point-{point_context.global_index:04d}{measurement_suffix}-"
+            f"{timestamp.strftime('%Y%m%d-%H%M%S-%f')}.bin"
         )
         mission_dir = Path("signals") / "rx" / "mission" / point_context.mission_name
         mission_dir.mkdir(parents=True, exist_ok=True)
@@ -296,7 +301,12 @@ class MissionRxMeasurementService:
 
         self._on_status("measurement", "succeeded")
         payload = {
-            "measurement_id": f"{point_context.mission_name}-{point_context.global_index:04d}-{int(timestamp.timestamp())}",
+            "measurement_id": (
+                f"{point_context.mission_name}-{point_context.global_index:04d}-"
+                f"{point_context.measurement_index + 1:02d}-{int(timestamp.timestamp())}"
+            ),
+            "measurement_index": point_context.measurement_index,
+            "measurements_per_point": point_context.measurements_per_point,
             "file_ref": file_ref,
             "point_id": point_context.point.id,
             "timestamp": timestamp.isoformat(),

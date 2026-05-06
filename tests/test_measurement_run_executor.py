@@ -715,3 +715,66 @@ def test_invalid_start_point_index_raises_for_active_points() -> None:
             persist_result=lambda _payload: None,
             config=MeasurementRunExecutorConfig(start_point_index=1),
         )
+
+
+def test_measurements_per_point_triggers_multiple_measurements_after_single_navigation() -> None:
+    nav = FakeNavigator(["succeeded", "succeeded"])
+    observed_contexts: list[tuple[int, int, str | None]] = []
+    persisted: list[dict] = []
+
+    class ContextRecordingMeasurementService:
+        def trigger(self, point_context) -> dict:
+            observed_contexts.append(
+                (
+                    point_context.global_index,
+                    point_context.measurement_index,
+                    point_context.point.id,
+                )
+            )
+            return {
+                "measurement_id": f"{point_context.point.id}-{point_context.measurement_index}",
+                "measurement_index": point_context.measurement_index,
+            }
+
+    executor = MeasurementRunExecutor(
+        mission=_mission(),
+        navigator=nav,
+        measurement_service=ContextRecordingMeasurementService(),
+        persist_result=persisted.append,
+        config=MeasurementRunExecutorConfig(measurements_per_point=3),
+    )
+
+    final_state = executor.start()
+
+    assert final_state == "completed"
+    assert [item[0:2] for item in nav.calls] == [(1.0, 2.0), (3.0, 4.0)]
+    assert observed_contexts == [
+        (0, 0, "p1"),
+        (0, 1, "p1"),
+        (0, 2, "p1"),
+        (1, 0, "p2"),
+        (1, 1, "p2"),
+        (1, 2, "p2"),
+    ]
+    assert len(persisted) == 6
+    assert [payload["measurement_index"] for payload in persisted] == [0, 1, 2, 0, 1, 2]
+    assert all(payload["measurements_per_point"] == 3 for payload in persisted)
+    assert executor.records[0].measurement_result == {
+        "measurements_per_point": 3,
+        "measurements": [
+            {"measurement_id": "p1-0", "measurement_index": 0},
+            {"measurement_id": "p1-1", "measurement_index": 1},
+            {"measurement_id": "p1-2", "measurement_index": 2},
+        ],
+    }
+
+
+def test_measurements_per_point_must_be_positive() -> None:
+    with pytest.raises(ValueError, match="measurements_per_point"):
+        MeasurementRunExecutor(
+            mission=_mission(),
+            navigator=FakeNavigator(["succeeded"]),
+            trigger_measurement=lambda point: {},
+            persist_result=lambda payload: None,
+            config=MeasurementRunExecutorConfig(measurements_per_point=0),
+        )
