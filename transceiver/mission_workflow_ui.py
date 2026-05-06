@@ -360,9 +360,9 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
 
         workflow = ctk.CTkFrame(self)
         workflow.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 6))
-        for col in range(8):
+        for col in range(6):
             workflow.columnconfigure(col, weight=0)
-        workflow.columnconfigure(7, weight=1)
+        workflow.columnconfigure(5, weight=1)
 
         ctk.CTkLabel(workflow, text="1) Missionsparameter").grid(row=0, column=0, padx=8, pady=8)
         ctk.CTkLabel(workflow, text="Name").grid(row=0, column=1, padx=(8, 2))
@@ -371,10 +371,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         ctk.CTkLabel(workflow, text="Wiederholungen").grid(row=0, column=3, padx=(8, 2))
         self.repeat_var = tk.StringVar(value="1")
         ctk.CTkEntry(workflow, textvariable=self.repeat_var, width=70).grid(row=0, column=4, padx=(0, 8))
-        ctk.CTkLabel(workflow, text="Messungen/Punkt").grid(row=0, column=5, padx=(8, 2))
-        self.measurements_per_point_var = tk.StringVar(value="1")
-        ctk.CTkEntry(workflow, textvariable=self.measurements_per_point_var, width=70).grid(row=0, column=6, padx=(0, 8))
-        ctk.CTkButton(workflow, text="Mission validieren", command=self._validate_selected).grid(row=0, column=7, padx=(0, 8), sticky="w")
+        ctk.CTkButton(workflow, text="Mission validieren", command=self._validate_selected).grid(row=0, column=5, padx=(0, 8), sticky="w")
 
         points_editor = ctk.CTkFrame(self)
         points_editor.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 6))
@@ -770,7 +767,6 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._mission_points: list[MeasurementPoint] = []
         self.mission_name_var.trace_add("write", lambda *_args: self._persist_workflow_state())
         self.repeat_var.trace_add("write", lambda *_args: self._persist_workflow_state())
-        self.measurements_per_point_var.trace_add("write", lambda *_args: self._persist_workflow_state())
         self._refresh_start_point_options()
         self._refresh_map_section()
         self._refresh_review_ready_indicator()
@@ -1725,17 +1721,6 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._open_review_for_result_row(row_index)
         return "break"
 
-    @staticmethod
-    def _configure_results_context_menu_entry(menu: tk.Menu, index: int, *, label: str, state: str | None = None) -> None:
-        if state is None:
-            menu.entryconfigure(index, label=label)
-            return
-        try:
-            menu.entryconfigure(index, label=label, state=state)
-        except TypeError as exc:
-            if "state" not in str(exc):
-                raise
-
     def _on_results_table_context_menu(self, event: tk.Event) -> str | None:
         row_id = self.results_table.identify_row(event.y)
         if not row_id:
@@ -1749,12 +1734,8 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             return None
         menu = self.results_table_context_menu
         selected_indices = self._selected_result_row_indices()
-        move_up_index = getattr(self, "_results_context_move_up_index", 0)
-        move_down_index = getattr(self, "_results_context_move_down_index", 1)
-        remove_index = getattr(self, "_results_context_remove_index", 3)
-        self._configure_results_context_menu_entry(
-            menu,
-            move_up_index,
+        menu.entryconfigure(
+            self._results_context_move_up_index,
             label=self._move_results_context_label(selected_count, direction="up"),
             state=(
                 "normal"
@@ -1762,9 +1743,8 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 else "disabled"
             ),
         )
-        self._configure_results_context_menu_entry(
-            menu,
-            move_down_index,
+        menu.entryconfigure(
+            self._results_context_move_down_index,
             label=self._move_results_context_label(selected_count, direction="down"),
             state=(
                 "normal"
@@ -1772,9 +1752,8 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 else "disabled"
             ),
         )
-        self._configure_results_context_menu_entry(
-            menu,
-            remove_index,
+        menu.entryconfigure(
+            self._results_context_remove_index,
             label=self._remove_results_context_label(selected_count),
         )
         try:
@@ -1883,17 +1862,16 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._move_selected_results(direction="down")
 
     def _selected_result_row_indices(self) -> tuple[int, ...]:
-        records = getattr(self, "_records", [])
         selected_items = tuple(self.results_table.selection())
         if selected_items:
             return tuple(
                 sorted(
                     idx
                     for idx in (self.results_table.index(item_id) for item_id in selected_items)
-                    if 0 <= idx < len(records)
+                    if 0 <= idx < len(self._records)
                 )
             )
-        return tuple(idx for idx in getattr(self, "_selected_result_indices", ()) if 0 <= idx < len(records))
+        return tuple(idx for idx in getattr(self, "_selected_result_indices", ()) if 0 <= idx < len(self._records))
 
     def _remove_selected_results(self) -> None:
         selected_indices = self._selected_result_row_indices()
@@ -3216,16 +3194,6 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             point_payload.update(quaternion_values)
         return point_payload
 
-    def _parse_measurements_per_point(self) -> int:
-        raw_value = self.measurements_per_point_var.get().strip()
-        try:
-            parsed = int(raw_value)
-        except ValueError as exc:
-            raise ValueError("'Messungen/Punkt' muss eine ganze Zahl >= 1 sein") from exc
-        if parsed < 1:
-            raise ValueError("'Messungen/Punkt' muss >= 1 sein")
-        return parsed
-
     def _validate_selected(self) -> None:
         if not self._mission_points:
             self._set_validation_text("Bitte zuerst mindestens einen Messpunkt anlegen.")
@@ -3233,7 +3201,6 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         try:
             repeat_raw = self.repeat_var.get().strip()
             repeat = int(repeat_raw)
-            measurements_per_point = self._parse_measurements_per_point()
             mission = MeasurementMission(
                 name=self.mission_name_var.get().strip(),
                 points=list(self._mission_points),
@@ -3271,11 +3238,10 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._persist_workflow_state()
         self._refresh_map_section()
         repeats = mission.repeat or 1
-        total_points = len(mission.points) * repeats * measurements_per_point
+        total_points = len(mission.points) * repeats
         validation_lines = [
             f"✅ Mission valide: {mission.name}\n"
-            f"Punkte pro Zyklus: {len(mission.points)} | Wiederholungen: {repeats} | "
-            f"Messungen/Punkt: {measurements_per_point} | Gesamtmessungen: {total_points}"
+            f"Punkte pro Zyklus: {len(mission.points)} | Wiederholungen: {repeats} | Gesamtpunkte: {total_points}"
         ]
         runtime_reasons = self._runtime_guard_reasons()
         if runtime_reasons:
@@ -3315,16 +3281,9 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             repeat = int(repeat_raw)
         except ValueError:
             repeat = repeat_raw
-        measurements_raw = self.measurements_per_point_var.get().strip()
-        measurements_per_point: int | str
-        try:
-            measurements_per_point = int(measurements_raw)
-        except ValueError:
-            measurements_per_point = measurements_raw
         return {
             "name": self.mission_name_var.get().strip(),
             "repeat": repeat,
-            "measurements_per_point": measurements_per_point,
             "points": [self._serialize_point(point) for point in self._mission_points],
             "start_point_index": self._selected_start_point_index(),
             "map_config_file": self._selected_map_config_file,
@@ -3358,16 +3317,6 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         if not math.isfinite(parsed_x) or not math.isfinite(parsed_y):
             return None
         return (parsed_x, parsed_y)
-
-    @staticmethod
-    def _parse_persisted_measurements_per_point(value: Any) -> int:
-        if isinstance(value, bool):
-            return 1
-        try:
-            parsed = int(value)
-        except (TypeError, ValueError):
-            return 1
-        return max(1, parsed)
 
     def _persist_workflow_state(self) -> None:
         if self._is_restoring_workflow_state:
@@ -3414,10 +3363,6 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         try:
             self.mission_name_var.set(mission.name)
             self.repeat_var.set(str(mission.repeat or 1))
-            measurements_per_point = self._parse_persisted_measurements_per_point(
-                payload.get("measurements_per_point", 1)
-            )
-            self.measurements_per_point_var.set(str(measurements_per_point))
             self._mission_points = list(mission.points)
             self._mission = mission
             self._selected_map_config = mission.map_config
@@ -3447,11 +3392,10 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                     )
                 )
             repeats = mission.repeat or 1
-            total_points = len(mission.points) * repeats * measurements_per_point
+            total_points = len(mission.points) * repeats
             self._set_validation_text(
                 f"✅ Persistierter Workflow geladen: {mission.name}\n"
-                f"Punkte pro Zyklus: {len(mission.points)} | Wiederholungen: {repeats} | "
-                f"Messungen/Punkt: {measurements_per_point} | Gesamtmessungen: {total_points}"
+                f"Punkte pro Zyklus: {len(mission.points)} | Wiederholungen: {repeats} | Gesamtpunkte: {total_points}"
             )
             self._refresh_review_ready_indicator()
             persisted_records = payload.get("records")
@@ -3606,7 +3550,6 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 start_point_index=start_point_index,
                 reverse_point_order=bool(self.reverse_point_order_var.get()),
                 enable_measurements=not test_run_enabled,
-                measurements_per_point=self._parse_measurements_per_point(),
                 confirm_measurement_after_navigation_failure=self._confirm_measurement_after_navigation_failure,
             ),
         )
@@ -4391,13 +4334,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 self._measurement_start_live_position_event.set()
 
     def _update_live_label(self, *, stage: str | None = None, status: str | None = None) -> None:
-        total = (
-            len(self._mission.points)
-            * (self._mission.repeat or 1)
-            * self._parse_persisted_measurements_per_point(self.measurements_per_point_var.get())
-            if self._mission
-            else 0
-        )
+        total = len(self._mission.points) * (self._mission.repeat or 1) if self._mission else 0
         done = len(self._records)
         current_idx = min(done + 1, total) if total > 0 else 0
 

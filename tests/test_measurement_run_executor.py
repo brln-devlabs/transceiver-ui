@@ -715,38 +715,3 @@ def test_invalid_start_point_index_raises_for_active_points() -> None:
             persist_result=lambda _payload: None,
             config=MeasurementRunExecutorConfig(start_point_index=1),
         )
-
-
-def test_executes_configured_measurements_per_point_after_one_navigation() -> None:
-    nav = FakeNavigator(["succeeded"])
-    observed_contexts: list[tuple[int, int, int]] = []
-    persisted: list[dict] = []
-
-    class Service:
-        @staticmethod
-        def trigger(point_context) -> dict:
-            observed_contexts.append(
-                (
-                    point_context.global_index,
-                    point_context.measurement_index,
-                    point_context.measurements_per_point,
-                )
-            )
-            return {"measurement_id": f"m-{point_context.global_index}"}
-
-    executor = MeasurementRunExecutor(
-        mission=MeasurementMission(name="multi", points=[_mission().points[0]], repeat=1),
-        navigator=nav,
-        measurement_service=Service(),
-        persist_result=persisted.append,
-        config=MeasurementRunExecutorConfig(measurements_per_point=3),
-    )
-
-    final_state = executor.start()
-
-    assert final_state == "completed"
-    assert len(nav.calls) == 1
-    assert observed_contexts == [(0, 0, 3), (1, 1, 3), (2, 2, 3)]
-    assert [payload["global_index"] for payload in persisted] == [0, 1, 2]
-    assert [payload["measurement_index"] for payload in persisted] == [0, 1, 2]
-    assert all(payload["measurements_per_point"] == 3 for payload in persisted)
