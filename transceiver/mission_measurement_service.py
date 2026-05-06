@@ -193,7 +193,8 @@ class MissionRxMeasurementService:
         timestamp = datetime.now(timezone.utc)
         filename = (
             f"point-{point_context.global_index:04d}-"
-            f"{timestamp.strftime('%Y%m%d-%H%M%S')}.bin"
+            f"measurement-{point_context.measurement_index + 1:02d}-"
+            f"{timestamp.strftime('%Y%m%d-%H%M%S-%f')}.bin"
         )
         mission_dir = Path("signals") / "rx" / "mission" / point_context.mission_name
         mission_dir.mkdir(parents=True, exist_ok=True)
