@@ -210,3 +210,24 @@ def test_parse_positive_int_defaults_invalid_measurements_per_point() -> None:
     assert _parse_positive_int("3", default=1) == 3
     assert _parse_positive_int("0", default=1) == 1
     assert _parse_positive_int("invalid", default=1) == 1
+
+
+def test_validate_positive_integer_input_allows_editing_valid_values() -> None:
+    from transceiver.mission_workflow_ui import MissionWorkflowWindow
+
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+
+    assert window._validate_positive_integer_input("") is True
+    assert window._validate_positive_integer_input("1") is True
+    assert window._validate_positive_integer_input("25") is True
+
+
+def test_validate_positive_integer_input_rejects_invalid_values() -> None:
+    from transceiver.mission_workflow_ui import MissionWorkflowWindow
+
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+
+    assert window._validate_positive_integer_input("0") is False
+    assert window._validate_positive_integer_input("-1") is False
+    assert window._validate_positive_integer_input("1.5") is False
+    assert window._validate_positive_integer_input("abc") is False

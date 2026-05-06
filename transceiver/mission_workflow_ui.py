@@ -94,6 +94,15 @@ def _parse_positive_int(value: Any, *, default: int = 1) -> int:
     return parsed if parsed >= 1 else default
 
 
+def _is_positive_integer_entry_value(value: Any) -> bool:
+    text = str(value)
+    if text == "":
+        return True
+    if not text.isdecimal():
+        return False
+    return int(text) >= 1
+
+
 def _map_executor_state_to_ui_text(state: str, completion_substatus: str | None = None) -> str:
     mapping = {
         "completed": "Abgeschlossen",
@@ -362,6 +371,9 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self.after_idle(self._stabilize_initial_geometry)
         self.after_idle(self._open_maximized)
 
+    def _validate_positive_integer_input(self, proposed_value: str) -> bool:
+        return _is_positive_integer_entry_value(proposed_value)
+
     def _build_ui(self) -> None:
         self.columnconfigure(0, weight=1)
         self.rowconfigure(2, weight=1)
@@ -628,6 +640,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             measurements_frame,
             textvariable=self.measurements_per_point_var,
             width=56,
+            validate="key",
             validatecommand=(self.register(self._validate_positive_integer_input), "%P"),
         ).grid(row=0, column=1, sticky="w")
         self.reverse_point_order_var = tk.BooleanVar(value=False)
