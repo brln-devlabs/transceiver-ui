@@ -358,6 +358,9 @@ class _TreeviewSelectionStub:
     def selection_set(self, item_id: str) -> None:
         self._selected = (item_id,)
 
+    def selection_remove(self, *item_ids: str) -> None:
+        self._selected = tuple(selected for selected in self._selected if selected not in item_ids)
+
     def index(self, item_id: str) -> int:
         return self._indices[item_id]
 
@@ -418,24 +421,50 @@ def test_on_results_table_select_updates_multi_selection_and_diagnostics() -> No
     assert draw_calls == ["draw"]
 
 
-def test_on_results_table_click_on_empty_region_preserves_multiselect() -> None:
+def test_on_results_table_click_on_empty_region_clears_multiselect() -> None:
     window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
     table = _TreeviewSelectionStub()
     table._selected = ("row-a", "row-b")
+    table._indices = {"row-a": 0, "row-b": 1}
     table._region = "cell"
     table._row_id = ""
     window.results_table = table
     window._selected_result_index = 0
     window._selected_result_indices = (0, 1)
     window.results_selection_diagnostics_var = _StringVarStub()
-    window._draw_map_preview = lambda: (_ for _ in ()).throw(AssertionError("must not redraw on empty click"))
+    draw_calls: list[str] = []
+    window._draw_map_preview = lambda: draw_calls.append("draw")
 
     result = window._on_results_table_click(SimpleNamespace(x=5, y=5))
 
     assert result == "break"
-    assert window._selected_result_indices == (0, 1)
+    assert table.selection() == ()
+    assert window._selected_result_indices == ()
+    assert window._selected_result_index is None
+    assert window.results_selection_diagnostics_var.value == "Auswahl: 0 Zeilen"
+    assert draw_calls == ["draw"]
+
+
+@pytest.mark.parametrize("region", ["heading", "separator"])
+def test_on_results_table_click_ignores_table_chrome_without_clearing_selection(region: str) -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    table = _TreeviewSelectionStub()
+    table._selected = ("row-a",)
+    table._indices = {"row-a": 0}
+    table._region = region
+    table._row_id = ""
+    window.results_table = table
+    window._selected_result_index = 0
+    window._selected_result_indices = (0,)
+    window.results_selection_diagnostics_var = _StringVarStub()
+    window._draw_map_preview = lambda: (_ for _ in ()).throw(AssertionError("must not redraw on table chrome click"))
+
+    result = window._on_results_table_click(SimpleNamespace(x=5, y=5))
+
+    assert result is None
+    assert table.selection() == ("row-a",)
+    assert window._selected_result_indices == (0,)
     assert window._selected_result_index == 0
-    assert window.results_selection_diagnostics_var.value == "Auswahl: 2 Zeilen"
 
 
 class _ResultsContextMenuStub:

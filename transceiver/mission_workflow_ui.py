@@ -1757,7 +1757,10 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         region = self.results_table.identify("region", event.x, event.y)
         if region in {"heading", "separator"}:
             return None
-        self._update_results_selection_diagnostics()
+        selected_items = self.results_table.selection()
+        if selected_items:
+            self.results_table.selection_remove(*selected_items)
+        self._on_results_table_select(event)
         return "break"
 
     def _on_results_table_double_click(self, event: tk.Event) -> str | None:
