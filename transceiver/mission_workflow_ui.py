@@ -752,17 +752,20 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             command=self._remove_selected_results,
         )
         self.results_selection_diagnostics_var = tk.StringVar(value="Auswahl: 0 Zeilen")
+        results_footer = ctk.CTkFrame(table_frame, fg_color="transparent")
+        results_footer.grid(row=1, column=0, sticky="ew", pady=(4, 0))
+        results_footer.columnconfigure(0, weight=1)
         ctk.CTkLabel(
-            table_frame,
+            results_footer,
             textvariable=self.results_selection_diagnostics_var,
             anchor="w",
             justify="left",
-        ).grid(row=1, column=0, sticky="ew", padx=(2, 0), pady=(4, 0))
+        ).grid(row=0, column=0, sticky="ew", padx=(2, 0))
         ctk.CTkButton(
-            table_frame,
+            results_footer,
             text="Ergebnisliste leeren",
             command=self._clear_results_table,
-        ).grid(row=1, column=1, sticky="e", padx=(8, 0), pady=(4, 0))
+        ).grid(row=0, column=1, sticky="e", padx=(8, 0))
 
         self._mission_points: list[MeasurementPoint] = []
         self.mission_name_var.trace_add("write", lambda *_args: self._persist_workflow_state())
