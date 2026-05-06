@@ -1724,6 +1724,71 @@ def _valid_tk_window(window: object | None) -> object | None:
     return window
 
 
+def _restore_workflow_window_focus(workflow_window: object | None) -> None:
+    """Bring the mission workflow window back to front after Qt review closes."""
+    workflow_window = _valid_tk_window(workflow_window)
+    if workflow_window is None:
+        return
+
+    def _call(method_name: str, *args: object) -> None:
+        method = getattr(workflow_window, method_name, None)
+        if not callable(method):
+            return
+        try:
+            method(*args)
+        except Exception:
+            _LOGGER.debug(
+                "Mission workflow focus restore failed during %s",
+                method_name,
+                exc_info=True,
+            )
+
+    def _set_topmost(enabled: bool) -> None:
+        attributes = getattr(workflow_window, "attributes", None)
+        if not callable(attributes):
+            return
+        try:
+            attributes("-topmost", bool(enabled))
+        except Exception:
+            _LOGGER.debug(
+                "Mission workflow focus restore failed during topmost=%s",
+                enabled,
+                exc_info=True,
+            )
+
+    def _release_topmost() -> None:
+        _set_topmost(False)
+
+    def _focus_and_schedule_release() -> None:
+        _call("focus_force")
+        after = getattr(workflow_window, "after", None)
+        if callable(after):
+            try:
+                after(50, _release_topmost)
+                return
+            except Exception:
+                _LOGGER.debug(
+                    "Mission workflow focus restore failed while scheduling topmost release",
+                    exc_info=True,
+                )
+        _release_topmost()
+
+    _call("deiconify")
+    _call("lift")
+    _set_topmost(True)
+    after_idle = getattr(workflow_window, "after_idle", None)
+    if callable(after_idle):
+        try:
+            after_idle(_focus_and_schedule_release)
+            return
+        except Exception:
+            _LOGGER.debug(
+                "Mission workflow focus restore failed while scheduling focus boost",
+                exc_info=True,
+            )
+    _focus_and_schedule_release()
+
+
 def _mission_review_qt_parent(qapp: object, workflow_window: object | None) -> object | None:
     """Resolve the Qt parent for the mission-review dialog.
 
@@ -7638,21 +7703,32 @@ class TransceiverUI(ctk.CTk):
                     else 1.0,
                     repetition_period_samples=int(ctx.get("period_samples")) if ctx.get("period_samples") is not None else None,
                 )
+                transient_attached = True
                 if workflow_window is not None:
-                    dialog.attach_tk_transient_parent(workflow_window)
-                dialog.raise_()
-                dialog.activateWindow()
-                logging.info(
-                    "Mission review opening dialog: point_label=%s reason=%s detail=%s",
-                    point_label,
-                    outcome.get("reason", ""),
-                    outcome.get("detail", ""),
-                )
-                dialog_result = dialog.exec()
-                if workflow_window is not None:
-                    workflow_window.deiconify()
-                    workflow_window.lift()
-                    workflow_window.after_idle(workflow_window.focus_force)
+                    try:
+                        transient_attached = bool(dialog.attach_tk_transient_parent(workflow_window))
+                    except Exception:
+                        transient_attached = False
+                        _LOGGER.warning(
+                            "Mission review failed to attach Tk transient parent for workflow window",
+                            exc_info=True,
+                        )
+                    if not transient_attached:
+                        _LOGGER.warning(
+                            "Mission review dialog is opening without native Tk transient parent binding"
+                        )
+                try:
+                    dialog.raise_()
+                    dialog.activateWindow()
+                    logging.info(
+                        "Mission review opening dialog: point_label=%s reason=%s detail=%s",
+                        point_label,
+                        outcome.get("reason", ""),
+                        outcome.get("detail", ""),
+                    )
+                    dialog_result = dialog.exec()
+                finally:
+                    _restore_workflow_window_focus(workflow_window)
                 logging.info(
                     "Mission review dialog finished: point_label=%s result=%s confirmed=%s reason=%s detail=%s",
                     point_label,
