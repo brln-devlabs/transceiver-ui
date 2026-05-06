@@ -762,6 +762,32 @@ def test_extract_lidar_ranges_from_scan_text_supports_list_style() -> None:
     assert values[2] == 3.4
 
 
+def test_draw_lidar_scan_overlay_rotates_scan_180_degrees_to_match_map_heading() -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    window._map_image_original = SimpleNamespace(width=lambda: 200, height=lambda: 120)
+    window._map_preview_scale = (1.0, 1.0)
+    window._map_preview_offset = (0.0, 0.0)
+    window._world_to_map_pixel = lambda *, x, y, image_height: (x, y)
+    window._is_pixel_inside_map = lambda *_args, **_kwargs: True
+    line_calls: list[tuple[float, float, float, float]] = []
+    window.map_preview_canvas = SimpleNamespace(
+        create_oval=lambda *_args, **_kwargs: None,
+        create_line=lambda sx, sy, ex, ey, **_kwargs: line_calls.append((sx, sy, ex, ey)),
+    )
+    window._append_validation = lambda _message: None
+
+    window._draw_lidar_scan_overlay_for_point(
+        point=MeasurementPoint(id="p1", name="P1", x=50.0, y=50.0, yaw=0.0),
+        scan={"angle_min": 0.0, "angle_increment": 0.0, "ranges": [10.0]},
+    )
+
+    assert len(line_calls) == 1
+    start_x, start_y, end_x, end_y = line_calls[0]
+    assert (start_x, start_y) == (50.0, 50.0)
+    assert end_x == pytest.approx(40.0)
+    assert end_y == pytest.approx(50.0)
+
+
 def test_draw_lidar_scan_overlay_deduplicates_dense_endpoints() -> None:
     window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
     window._map_image_original = SimpleNamespace(width=lambda: 200, height=lambda: 120)
