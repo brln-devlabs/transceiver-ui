@@ -55,7 +55,10 @@ ECHO_OVERLAY_COLORS = ("#00796B", "#FFB300", "#8E24AA", "#00ACC1", "#F4511E")
 ECHO_HEADING_MARKERS = ("🟢", "🟠", "🟣", "🔵", "🟤")
 LIDAR_OVERLAY_MAX_DRAWN_BEAMS = 450
 LIDAR_OVERLAY_CELL_SIZE_PX = 3.0
-LIDAR_OVERLAY_MAX_BEAMS_PER_CELL = 1
+LIDAR_OVERLAY_MAX_BEAMS_PER_CELL = 2
+LIDAR_OVERLAY_SMALL_MAP_REFERENCE_SIZE_PX = 600.0
+LIDAR_OVERLAY_SMALL_MAP_MIN_CELL_FACTOR = 0.35
+LIDAR_OVERLAY_MIN_CELL_SIZE_PX = 1.0
 MEASUREMENT_START_LIVE_POSITION_WAIT_TIMEOUT_S = 1.6
 MEASUREMENT_START_LIVE_POSITION_WAIT_INTERVAL_S = 0.1
 LIVE_ECHO_CACHE_POSITION_DELTA_M = 0.015
@@ -2812,12 +2815,29 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         )
         beam_stride = max(1, finite_positive_beam_count // LIDAR_OVERLAY_MAX_DRAWN_BEAMS)
         density_factor = max(1.0, math.sqrt(finite_positive_beam_count / float(LIDAR_OVERLAY_MAX_DRAWN_BEAMS)))
-        effective_cell_size_px = LIDAR_OVERLAY_CELL_SIZE_PX * density_factor
+        preview_width = original.width() * scale_x
+        preview_height = original.height() * scale_y
+        preview_min_dimension = max(1.0, min(preview_width, preview_height))
+        small_map_cell_factor = min(
+            1.0,
+            max(
+                LIDAR_OVERLAY_SMALL_MAP_MIN_CELL_FACTOR,
+                preview_min_dimension / LIDAR_OVERLAY_SMALL_MAP_REFERENCE_SIZE_PX,
+            ),
+        )
+        effective_cell_size_px = max(
+            LIDAR_OVERLAY_MIN_CELL_SIZE_PX,
+            LIDAR_OVERLAY_CELL_SIZE_PX * density_factor * small_map_cell_factor,
+        )
+        skipped_by_stride_count = 0
+        skipped_by_cell_filter_count = 0
+        drawn_beam_count = 0
         drawn_beam_cells: dict[tuple[int, int], int] = {}
         for idx, distance in enumerate(ranges):
-            if not math.isfinite(distance) or distance <= 0.0:
+            if not isinstance(distance, (int, float)) or not math.isfinite(distance) or distance <= 0.0:
                 continue
             if idx % beam_stride != 0:
+                skipped_by_stride_count += 1
                 continue
             beam_angle = point.yaw + angle_min + idx * angle_increment
             end_world_x = point.x + math.cos(beam_angle) * distance
@@ -2833,6 +2853,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             )
             current_cell_count = drawn_beam_cells.get(beam_cell, 0)
             if current_cell_count >= LIDAR_OVERLAY_MAX_BEAMS_PER_CELL:
+                skipped_by_cell_filter_count += 1
                 continue
             drawn_beam_cells[beam_cell] = current_cell_count + 1
             self.map_preview_canvas.create_line(
@@ -2844,6 +2865,16 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 width=1,
                 stipple="gray25",
             )
+            drawn_beam_count += 1
+        self._append_validation(
+            "ℹ️ LiDAR-Overlay: "
+            f"gültige Ranges={finite_positive_beam_count}, "
+            f"Stride übersprungen={skipped_by_stride_count}, "
+            f"Zellfilter übersprungen={skipped_by_cell_filter_count}, "
+            f"gezeichnet={drawn_beam_count}, "
+            f"Zellgröße={effective_cell_size_px:.2f}px, "
+            f"Stride={beam_stride}"
+        )
 
     def _draw_live_marker(self) -> None:
         mission = self._mission

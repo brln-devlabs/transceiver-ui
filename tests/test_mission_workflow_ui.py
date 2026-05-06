@@ -770,17 +770,23 @@ def test_draw_lidar_scan_overlay_deduplicates_dense_endpoints() -> None:
     window._world_to_map_pixel = lambda *, x, y, image_height: (x, y)
     window._is_pixel_inside_map = lambda *_args, **_kwargs: True
     line_calls: list[tuple[float, float, float, float]] = []
+    messages: list[str] = []
     window.map_preview_canvas = SimpleNamespace(
         create_oval=lambda *_args, **_kwargs: None,
         create_line=lambda sx, sy, ex, ey, **_kwargs: line_calls.append((sx, sy, ex, ey)),
     )
+    window._append_validation = messages.append
 
     window._draw_lidar_scan_overlay_for_point(
         point=MeasurementPoint(id="p1", name="P1", x=10.0, y=20.0, yaw=0.0),
         scan={"angle_min": 0.0, "angle_increment": 0.0, "ranges": [2.0] * 1800},
     )
 
-    assert len(line_calls) == 1
+    assert len(line_calls) == 2
+    assert messages == [
+        "ℹ️ LiDAR-Overlay: gültige Ranges=1800, Stride übersprungen=1350, "
+        "Zellfilter übersprungen=448, gezeichnet=2, Zellgröße=2.10px, Stride=4"
+    ]
 
 
 def test_draw_lidar_scan_overlay_adapts_stride_for_large_scan() -> None:
@@ -791,10 +797,12 @@ def test_draw_lidar_scan_overlay_adapts_stride_for_large_scan() -> None:
     window._world_to_map_pixel = lambda *, x, y, image_height: (x, y)
     window._is_pixel_inside_map = lambda *_args, **_kwargs: True
     line_calls: list[tuple[float, float, float, float]] = []
+    messages: list[str] = []
     window.map_preview_canvas = SimpleNamespace(
         create_oval=lambda *_args, **_kwargs: None,
         create_line=lambda sx, sy, ex, ey, **_kwargs: line_calls.append((sx, sy, ex, ey)),
     )
+    window._append_validation = messages.append
 
     window._draw_lidar_scan_overlay_for_point(
         point=MeasurementPoint(id="p2", name="P2", x=0.0, y=0.0, yaw=0.0),
@@ -802,6 +810,9 @@ def test_draw_lidar_scan_overlay_adapts_stride_for_large_scan() -> None:
     )
 
     assert len(line_calls) <= 700
+    assert "gültige Ranges=2000" in messages[0]
+    assert "Stride übersprungen=1500" in messages[0]
+    assert f"gezeichnet={len(line_calls)}" in messages[0]
 
 
 def test_build_waypoint_arrow_polygon_points_to_positive_x_for_zero_yaw() -> None:
