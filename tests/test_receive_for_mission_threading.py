@@ -550,8 +550,15 @@ def test_review_measurement_for_mission_uses_workflow_native_parent_not_qt_top_l
         def lift(self):
             workflow_calls.append("lift")
 
+        def attributes(self, name, value):
+            workflow_calls.append(f"attributes:{name}:{value}")
+
         def after_idle(self, callback):
             workflow_calls.append("after_idle")
+            callback()
+
+        def after(self, delay_ms, callback):
+            workflow_calls.append(f"after:{delay_ms}")
             callback()
 
         def focus_force(self):
@@ -624,5 +631,134 @@ def test_review_measurement_for_mission_uses_workflow_native_parent_not_qt_top_l
 
     assert dialog_init_kwargs["parent"] is None
     assert attached_workflow_windows == [ui._mission_workflow_window]
-    assert workflow_calls == ["deiconify", "lift", "after_idle", "focus_force"]
+    assert workflow_calls == [
+        "deiconify",
+        "lift",
+        "attributes:-topmost:True",
+        "after_idle",
+        "focus_force",
+        "after:50",
+        "attributes:-topmost:False",
+    ]
+    assert outcome["approved"] is False
+
+
+def test_review_measurement_for_mission_restores_workflow_when_native_parent_attach_fails(
+    monkeypatch, caplog
+) -> None:
+    import logging
+    import numpy as np
+    import queue
+    import transceiver.__main__ as app_module
+
+    ui = object.__new__(TransceiverUI)
+    ui._ui = lambda callback: callback()
+    ui._out_queue = queue.Queue()
+    ui.latest_fs = 10.0
+    ui.rx_channel_2 = types.SimpleNamespace(get=lambda: False)
+    ui.rx_xcorr_normalized_enable = types.SimpleNamespace(get=lambda: False)
+    ui.rx_interpolation_enable = types.SimpleNamespace(get=lambda: False)
+    ui._select_rx_display_data = lambda loaded: (loaded, "CH0")
+    ui._get_crosscorr_reference = lambda: (np.array([1.0], dtype=float), "TX")
+    ui._apply_crosscorr_interpolation = (
+        lambda data, fs, ref_data, crosscorr_compare=None, **_kwargs: (data, ref_data, crosscorr_compare, fs)
+    )
+    ui._rx_effective_interpolation_factor = lambda: 1.0
+
+    workflow_calls: list[str] = []
+
+    class _WorkflowWindow:
+        def winfo_exists(self):
+            return True
+
+        def winfo_id(self):
+            return 12345
+
+        def deiconify(self):
+            workflow_calls.append("deiconify")
+
+        def lift(self):
+            workflow_calls.append("lift")
+
+        def attributes(self, name, value):
+            workflow_calls.append(f"attributes:{name}:{value}")
+
+        def after_idle(self, callback):
+            workflow_calls.append("after_idle")
+            callback()
+
+        def after(self, delay_ms, callback):
+            workflow_calls.append(f"after:{delay_ms}")
+            callback()
+
+        def focus_force(self):
+            workflow_calls.append("focus_force")
+
+    ui._mission_workflow_window = _WorkflowWindow()
+
+    monkeypatch.setattr(
+        app_module.rx_convert,
+        "load_iq_file",
+        lambda *_args, **_kwargs: np.array([2.0], dtype=float),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "_build_crosscorr_ctx",
+        lambda *_args, **_kwargs: {
+            "lags": np.array([0.0]),
+            "mag": np.array([1.0]),
+            "los_idx": 0,
+            "echo_indices": [],
+        },
+    )
+
+    class _DummyApp:
+        def activeWindow(self):
+            raise AssertionError("activeWindow must not be used while a workflow window exists")
+
+    monkeypatch.setattr(app_module.pg, "mkQApp", lambda: _DummyApp())
+
+    attached_workflow_windows: list[object | None] = []
+
+    class _DummyDialog:
+        def __init__(self, **_kwargs):
+            self.confirmed = False
+            self.selected_los_idx = None
+            self.selected_echo_indices = []
+            self.manual_lags = {}
+            self.echo_delays = []
+
+        def attach_tk_transient_parent(self, workflow_window):
+            attached_workflow_windows.append(workflow_window)
+            return False
+
+        def raise_(self):
+            return None
+
+        def activateWindow(self):
+            return None
+
+        def exec(self):
+            return 0
+
+    monkeypatch.setattr(app_module, "MissionMeasurementReviewDialog", _DummyDialog)
+
+    with caplog.at_level(logging.WARNING, logger=app_module._LOGGER.name):
+        outcome = TransceiverUI.review_measurement_for_mission(
+            ui,
+            point_label="P1",
+            output_file="signals/rx/mission/demo.bin",
+        )
+
+    assert attached_workflow_windows == [ui._mission_workflow_window]
+    assert "without native Tk transient parent binding" in caplog.text
+    assert workflow_calls == [
+        "deiconify",
+        "lift",
+        "attributes:-topmost:True",
+        "after_idle",
+        "focus_force",
+        "after:50",
+        "attributes:-topmost:False",
+    ]
     assert outcome["approved"] is False
