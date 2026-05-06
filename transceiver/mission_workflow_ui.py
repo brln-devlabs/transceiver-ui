@@ -732,6 +732,18 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self.results_table.bind("<Button-3>", self._on_results_table_context_menu, add="+")
         self.results_table.bind("<Control-Button-1>", self._on_results_table_context_menu, add="+")
         self.results_table_context_menu = tk.Menu(self.results_table, tearoff=False)
+        self._results_context_move_up_index = 0
+        self.results_table_context_menu.add_command(
+            label="Markierte Einträge nach oben verschieben",
+            command=self._move_selected_results_up,
+        )
+        self._results_context_move_down_index = 1
+        self.results_table_context_menu.add_command(
+            label="Markierte Einträge nach unten verschieben",
+            command=self._move_selected_results_down,
+        )
+        self.results_table_context_menu.add_separator()
+        self._results_context_remove_index = 3
         self.results_table_context_menu.add_command(
             label="Markierte Einträge entfernen",
             command=self._remove_selected_results,
@@ -1718,7 +1730,29 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         if selected_count <= 0:
             return None
         menu = self.results_table_context_menu
-        menu.entryconfigure(0, label=self._remove_results_context_label(selected_count))
+        selected_indices = self._selected_result_row_indices()
+        menu.entryconfigure(
+            self._results_context_move_up_index,
+            label=self._move_results_context_label(selected_count, direction="up"),
+            state=(
+                "normal"
+                if self._can_move_selected_results(selected_indices, direction="up")
+                else "disabled"
+            ),
+        )
+        menu.entryconfigure(
+            self._results_context_move_down_index,
+            label=self._move_results_context_label(selected_count, direction="down"),
+            state=(
+                "normal"
+                if self._can_move_selected_results(selected_indices, direction="down")
+                else "disabled"
+            ),
+        )
+        menu.entryconfigure(
+            self._results_context_remove_index,
+            label=self._remove_results_context_label(selected_count),
+        )
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -1730,6 +1764,99 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         if selected_count == 1:
             return "Markierten Eintrag entfernen"
         return f"{selected_count} markierte Einträge entfernen"
+
+    @staticmethod
+    def _move_results_context_label(selected_count: int, *, direction: str) -> str:
+        direction_label = "oben" if direction == "up" else "unten"
+        if selected_count == 1:
+            return f"Markierten Eintrag nach {direction_label} verschieben"
+        return f"{selected_count} markierte Einträge nach {direction_label} verschieben"
+
+    def _can_move_selected_results(self, selected_indices: tuple[int, ...], *, direction: str) -> bool:
+        if not selected_indices or not self._records:
+            return False
+        if direction == "up":
+            return selected_indices[0] > 0
+        if direction == "down":
+            return selected_indices[-1] < len(self._records) - 1
+        return False
+
+    def _result_table_values(self, payload: dict[str, Any]) -> tuple[str, ...]:
+        meas = payload.get("measurement", {})
+        result = meas.get("result", {}) if isinstance(meas.get("result"), dict) else {}
+        review = result.get("review", {}) if isinstance(result.get("review"), dict) else {}
+        review_reason = review.get("reason") if isinstance(review.get("reason"), str) else ""
+        review_detail = review.get("detail") if isinstance(review.get("detail"), str) else ""
+        error_text = payload.get("error") or ""
+        if review_reason:
+            error_text = f"{error_text} [{review_reason}]" if error_text else review_reason
+        if review_detail:
+            error_text = f"{error_text}: {review_detail}" if error_text else review_detail
+        combined_status = self._compose_table_outcome(payload, error_text)
+        echo_distances = self._format_echo_distances_for_table(result.get("echo_delays"))
+        return (
+            self._format_one_based_index(payload.get("global_index")),
+            self._format_one_based_index(payload.get("point_index")),
+            self._format_live_position_for_table(payload),
+            self._format_live_distance_to_rx_for_table(payload),
+            *echo_distances,
+            combined_status,
+        )
+
+    def _refresh_results_table(self, selected_indices: tuple[int, ...] = ()) -> None:
+        self.results_table.delete(*self.results_table.get_children())
+        for payload in self._records:
+            self.results_table.insert("", "end", values=self._result_table_values(payload))
+
+        children = tuple(self.results_table.get_children())
+        selected_items = tuple(children[idx] for idx in selected_indices if 0 <= idx < len(children))
+        if selected_items:
+            self.results_table.selection_set(*selected_items)
+            self.results_table.focus(selected_items[0])
+            self.results_table.see(selected_items[0])
+        else:
+            if children:
+                self.results_table.selection_remove(*children)
+            self._selected_result_index = None
+            self._selected_result_indices = ()
+        self._on_results_table_select(tk.Event())
+
+    def _move_selected_results(self, *, direction: str) -> None:
+        selected_indices = self._selected_result_row_indices()
+        if not self._can_move_selected_results(selected_indices, direction=direction):
+            return
+
+        selected_set = set(selected_indices)
+        if direction == "up":
+            for index in selected_indices:
+                target = index - 1
+                if target >= 0 and target not in selected_set:
+                    self._records[target], self._records[index] = self._records[index], self._records[target]
+                    selected_set.remove(index)
+                    selected_set.add(target)
+        elif direction == "down":
+            for index in reversed(selected_indices):
+                target = index + 1
+                if target < len(self._records) and target not in selected_set:
+                    self._records[target], self._records[index] = self._records[index], self._records[target]
+                    selected_set.remove(index)
+                    selected_set.add(target)
+        else:
+            return
+
+        new_selected_indices = tuple(sorted(selected_set))
+        self._refresh_results_table(new_selected_indices)
+        self._persist_workflow_state()
+        self._update_live_label()
+        self._draw_map_preview()
+        direction_text = "oben" if direction == "up" else "unten"
+        self._append_validation(f"ℹ️ Ergebnisliste: Auswahl nach {direction_text} verschoben.")
+
+    def _move_selected_results_up(self) -> None:
+        self._move_selected_results(direction="up")
+
+    def _move_selected_results_down(self) -> None:
+        self._move_selected_results(direction="down")
 
     def _selected_result_row_indices(self) -> tuple[int, ...]:
         selected_items = tuple(self.results_table.selection())
@@ -4242,32 +4369,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
     def _on_record(self, payload: dict[str, Any]) -> None:
         self._attach_result_table_snapshot(payload)
         self._records.append(payload)
-        meas = payload.get("measurement", {})
-        result = meas.get("result", {}) if isinstance(meas.get("result"), dict) else {}
-        review = result.get("review", {}) if isinstance(result.get("review"), dict) else {}
-        review_reason = review.get("reason") if isinstance(review.get("reason"), str) else ""
-        review_detail = review.get("detail") if isinstance(review.get("detail"), str) else ""
-        error_text = payload.get("error") or ""
-        if review_reason:
-            error_text = f"{error_text} [{review_reason}]" if error_text else review_reason
-        if review_detail:
-            error_text = f"{error_text}: {review_detail}" if error_text else review_detail
-        combined_status = self._compose_table_outcome(payload, error_text)
-        echo_distances = self._format_echo_distances_for_table(result.get("echo_delays"))
-        live_position_text = self._format_live_position_for_table(payload)
-        live_distance_to_rx = self._format_live_distance_to_rx_for_table(payload)
-        self.results_table.insert(
-            "",
-            "end",
-            values=(
-                self._format_one_based_index(payload.get("global_index")),
-                self._format_one_based_index(payload.get("point_index")),
-                live_position_text,
-                live_distance_to_rx,
-                *echo_distances,
-                combined_status,
-            ),
-        )
+        self.results_table.insert("", "end", values=self._result_table_values(payload))
         self._update_live_label()
 
     def _attach_result_table_snapshot(self, payload: dict[str, Any]) -> None:
