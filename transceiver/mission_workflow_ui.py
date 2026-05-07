@@ -74,6 +74,7 @@ MULTI_SELECTION_ECHO_DOT_COLOR = "#00796B"
 MULTI_SELECTION_ECHO_DOT_OVERLAP_COLOR = "#F4511E"
 MULTI_SELECTION_ECHO_DOT_SAMPLE_LEVELS = (96, 160, 240)
 MULTI_SELECTION_PROBABILITY_DEBUG_LOG = True
+RESULTS_TABLE_EMPTY_ROW_IID = "__results_table_empty_row__"
 
 
 
@@ -763,6 +764,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         scroll = ttk.Scrollbar(table_frame, orient="vertical", command=self.results_table.yview)
         scroll.grid(row=0, column=1, sticky="ns")
         self.results_table.configure(yscrollcommand=scroll.set)
+        self._ensure_results_table_empty_row()
         self.results_table.bind("<<TreeviewSelect>>", self._on_results_table_select)
         self.results_table.bind("<Button-1>", self._on_results_table_click, add="+")
         self.results_table.bind("<Double-1>", self._on_results_table_double_click, add="+")
@@ -1752,22 +1754,25 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._draw_map_preview()
 
 
-    def _on_results_table_click(self, event: tk.Event) -> str | None:
-        row_id = self.results_table.identify_row(event.y)
-        if row_id:
-            return None
-        region = self.results_table.identify("region", event.x, event.y)
-        if region in {"heading", "separator"}:
-            return None
+    def _clear_results_table_selection(self, event: tk.Event) -> str:
         selected_items = self.results_table.selection()
         if selected_items:
             self.results_table.selection_remove(*selected_items)
         self._on_results_table_select(event)
         return "break"
 
+    def _on_results_table_click(self, event: tk.Event) -> str | None:
+        row_id = self.results_table.identify_row(event.y)
+        if row_id and row_id != RESULTS_TABLE_EMPTY_ROW_IID:
+            return None
+        region = self.results_table.identify("region", event.x, event.y)
+        if region in {"heading", "separator"}:
+            return None
+        return self._clear_results_table_selection(event)
+
     def _on_results_table_double_click(self, event: tk.Event) -> str | None:
         row_id = self.results_table.identify_row(event.y)
-        if not row_id:
+        if not row_id or row_id == RESULTS_TABLE_EMPTY_ROW_IID:
             return None
         row_index = self.results_table.index(row_id)
         self._open_review_for_result_row(row_index)
@@ -1775,7 +1780,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
 
     def _on_results_table_context_menu(self, event: tk.Event) -> str | None:
         row_id = self.results_table.identify_row(event.y)
-        if not row_id:
+        if not row_id or row_id == RESULTS_TABLE_EMPTY_ROW_IID:
             return None
         selected_items = tuple(self.results_table.selection())
         if row_id not in selected_items:
@@ -1883,12 +1888,38 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             combined_status,
         )
 
+    @staticmethod
+    def _blank_result_table_values() -> tuple[str, ...]:
+        return ("", "", "", "", "", "", "", "", "", "")
+
+    def _results_table_data_children(self) -> tuple[str, ...]:
+        return tuple(
+            item_id
+            for item_id in self.results_table.get_children()
+            if item_id != RESULTS_TABLE_EMPTY_ROW_IID
+        )
+
+    def _ensure_results_table_empty_row(self) -> None:
+        children = tuple(self.results_table.get_children())
+        if RESULTS_TABLE_EMPTY_ROW_IID in children:
+            if children[-1] != RESULTS_TABLE_EMPTY_ROW_IID:
+                self.results_table.move(RESULTS_TABLE_EMPTY_ROW_IID, "", "end")
+            self.results_table.item(RESULTS_TABLE_EMPTY_ROW_IID, values=self._blank_result_table_values())
+            return
+        self.results_table.insert(
+            "",
+            "end",
+            iid=RESULTS_TABLE_EMPTY_ROW_IID,
+            values=self._blank_result_table_values(),
+        )
+
     def _refresh_results_table(self, selected_indices: tuple[int, ...] = ()) -> None:
         self.results_table.delete(*self.results_table.get_children())
         for payload in self._records:
             self.results_table.insert("", "end", values=self._result_table_values(payload))
+        self._ensure_results_table_empty_row()
 
-        children = tuple(self.results_table.get_children())
+        children = self._results_table_data_children()
         selected_items = tuple(children[idx] for idx in selected_indices if 0 <= idx < len(children))
         if selected_items:
             self.results_table.selection_set(*selected_items)
@@ -1960,7 +1991,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         selected_indices = self._selected_result_row_indices()
         if not selected_indices:
             return
-        children = tuple(self.results_table.get_children())
+        children = self._results_table_data_children()
         for row_index in reversed(selected_indices):
             if 0 <= row_index < len(self._records):
                 del self._records[row_index]
@@ -2095,7 +2126,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
     def _refresh_result_table_row(self, row_index: int) -> None:
         if not 0 <= row_index < len(self._records):
             return
-        children = tuple(self.results_table.get_children())
+        children = self._results_table_data_children()
         if not 0 <= row_index < len(children):
             return
         self.results_table.item(children[row_index], values=self._result_table_values(self._records[row_index]))
@@ -2153,7 +2184,13 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         return prefill
 
     def _on_results_table_select(self, _event: tk.Event) -> None:
-        selected = self.results_table.selection()
+        selected = tuple(
+            item_id
+            for item_id in self.results_table.selection()
+            if item_id != RESULTS_TABLE_EMPTY_ROW_IID
+        )
+        if RESULTS_TABLE_EMPTY_ROW_IID in self.results_table.selection():
+            self.results_table.selection_remove(RESULTS_TABLE_EMPTY_ROW_IID)
         if not selected:
             self._selected_result_index = None
             self._selected_result_indices = ()
@@ -4563,7 +4600,12 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
     def _on_record(self, payload: dict[str, Any]) -> None:
         self._attach_result_table_snapshot(payload)
         self._records.append(payload)
-        self.results_table.insert("", "end", values=self._result_table_values(payload))
+        self.results_table.insert(
+            "",
+            self.results_table.index(RESULTS_TABLE_EMPTY_ROW_IID),
+            values=self._result_table_values(payload),
+        )
+        self._ensure_results_table_empty_row()
         self._update_live_label()
 
     def _attach_result_table_snapshot(self, payload: dict[str, Any]) -> None:
@@ -4798,6 +4840,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
 
     def _clear_results_table(self) -> None:
         self.results_table.delete(*self.results_table.get_children())
+        self._ensure_results_table_empty_row()
         self._records = []
         self._selected_result_index = None
         self._selected_result_indices = ()
