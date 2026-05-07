@@ -73,6 +73,7 @@ MULTI_SELECTION_ECHO_DOT_MAX_RADIUS_PX = 5.0
 MULTI_SELECTION_ECHO_DOT_COLOR = "#00796B"
 MULTI_SELECTION_ECHO_DOT_OVERLAP_COLOR = "#F4511E"
 MULTI_SELECTION_ECHO_DOT_SAMPLE_LEVELS = (96, 160, 240)
+MULTI_SELECTION_ECHO_DOT_MIN_VISIBLE_OVERLAP = 3
 MULTI_SELECTION_PROBABILITY_DEBUG_LOG = True
 RESULTS_TABLE_EMPTY_ROW_IID = "__results_table_empty_row__"
 
@@ -2440,6 +2441,8 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 continue
             position_count = len(bucket["positions"])
             max_overlap = max(max_overlap, position_count)
+            if position_count < MULTI_SELECTION_ECHO_DOT_MIN_VISIBLE_OVERLAP:
+                continue
             center_x = float(bucket["x"]) / sample_count
             center_y = float(bucket["y"]) / sample_count
             radius = min(
@@ -2464,11 +2467,12 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         if MULTI_SELECTION_PROBABILITY_DEBUG_LOG:
             self._append_validation(
                 "ℹ️ Echo-Heatmap: "
-                f"{drawn_points} Punktzellen aus {sampled_point_count} Ellipsenpunkten gezeichnet "
+                f"{drawn_points} Punktzellen ab {MULTI_SELECTION_ECHO_DOT_MIN_VISIBLE_OVERLAP} Überlagerungen "
+                f"aus {sampled_point_count} Ellipsenpunkten gezeichnet "
                 f"({candidate_count} Ellipsen, imaginäre Linienstärke={imaginary_line_width_px:.1f}px, "
                 f"max. Überlagerung={max_overlap})."
             )
-        return drawn_points > 0
+        return sampled_point_count > 0
 
     def _draw_live_echo_preview_overlay(self) -> None:
         if not bool(self.live_preview_enabled_var.get()):
