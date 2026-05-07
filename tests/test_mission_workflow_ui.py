@@ -216,6 +216,97 @@ def test_draw_selected_echo_overlay_renders_all_selected_results() -> None:
     assert {call["measurement_position"] for call in calls} == {(7.0, -2.0), (8.0, -1.0)}
 
 
+def test_draw_selected_echo_probability_overlay_draws_dot_cloud_without_grid_rectangles() -> None:
+    class FakeCanvas:
+        def __init__(self) -> None:
+            self.ovals: list[tuple[tuple[float, ...], dict[str, object]]] = []
+            self.rectangles: list[tuple[tuple[float, ...], dict[str, object]]] = []
+
+        def create_oval(self, *coords: float, **kwargs: object) -> int:
+            self.ovals.append((coords, kwargs))
+            return len(self.ovals)
+
+        def create_rectangle(self, *coords: float, **kwargs: object) -> int:
+            self.rectangles.append((coords, kwargs))
+            return len(self.rectangles)
+
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    window._mission = SimpleNamespace(map_config=SimpleNamespace(resolution=1.0))
+    window._map_image_original = SimpleNamespace(height=lambda: 100)
+    window._records = []
+    window._mission_points = []
+    window.map_preview_canvas = FakeCanvas()
+    window._append_validation = lambda _message: None
+    records = [
+        {
+            "live_position_at_measurement": {"x": 0.0, "y": 0.0},
+            "measurement": {"result": {"echo_delays": [{"distance_m": 1.0}]}},
+        },
+        {
+            "live_position_at_measurement": {"x": 1.0, "y": 0.0},
+            "measurement": {"result": {"echo_delays": [{"distance_m": 1.0}]}},
+        },
+    ]
+
+    def fake_preview_points(**kwargs: object) -> tuple[list[float] | None, int]:
+        measurement_position = kwargs["measurement_position"]
+        if measurement_position == (0.0, 0.0):
+            return ([10.0, 10.0, 20.0, 20.0], 1)
+        return ([10.2, 10.1, 30.0, 30.0], 1)
+
+    window._build_echo_overlay_preview_points = fake_preview_points
+
+    drawn = window._draw_selected_echo_probability_overlay(
+        rx_position=(0.0, 0.0),
+        records=records,
+    )
+
+    assert drawn is True
+    assert len(window.map_preview_canvas.rectangles) == 0
+    assert len(window.map_preview_canvas.ovals) == 3
+
+
+def test_draw_selected_echo_probability_overlay_scales_overlapping_point_radius() -> None:
+    class FakeCanvas:
+        def __init__(self) -> None:
+            self.ovals: list[tuple[tuple[float, ...], dict[str, object]]] = []
+
+        def create_oval(self, *coords: float, **kwargs: object) -> int:
+            self.ovals.append((coords, kwargs))
+            return len(self.ovals)
+
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    window._mission = SimpleNamespace(map_config=SimpleNamespace(resolution=1.0))
+    window._map_image_original = SimpleNamespace(height=lambda: 100)
+    window._records = []
+    window._mission_points = []
+    window.map_preview_canvas = FakeCanvas()
+    window._append_validation = lambda _message: None
+    records = [
+        {
+            "live_position_at_measurement": {"x": 0.0, "y": 0.0},
+            "measurement": {"result": {"echo_delays": [{"distance_m": 1.0}]}},
+        },
+        {
+            "live_position_at_measurement": {"x": 1.0, "y": 0.0},
+            "measurement": {"result": {"echo_delays": [{"distance_m": 1.0}]}},
+        },
+    ]
+    window._build_echo_overlay_preview_points = lambda **_kwargs: ([10.0, 10.0], 1)
+
+    drawn = window._draw_selected_echo_probability_overlay(
+        rx_position=(0.0, 0.0),
+        records=records,
+    )
+
+    assert drawn is True
+    assert len(window.map_preview_canvas.ovals) == 1
+    coords, kwargs = window.map_preview_canvas.ovals[0]
+    radius = (coords[2] - coords[0]) / 2.0
+    assert radius > 0.65
+    assert kwargs["fill"] == "#F4511E"
+
+
 def test_selected_record_overlay_point_prefers_live_yaw() -> None:
     window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
     window._mission_points = [MeasurementPoint(id="p0", name="P0", x=50.0, y=50.0, yaw=0.5)]
