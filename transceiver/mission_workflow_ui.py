@@ -2375,12 +2375,21 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 sampled_point_count += 1
                 bucket = ellipse_point_cells.setdefault(
                     cell,
-                    {"x": 0.0, "y": 0.0, "samples": 0, "ellipses": set()},
+                    {
+                        "x": 0.0,
+                        "y": 0.0,
+                        "samples": 0,
+                        "ellipses": set(),
+                        "positions": set(),
+                    },
                 )
                 bucket["x"] += float(px)
                 bucket["y"] += float(py)
                 bucket["samples"] += 1
                 bucket["ellipses"].add(candidate_count)
+                bucket["positions"].add(
+                    (float(measurement_position[0]), float(measurement_position[1]))
+                )
         if not ellipse_point_cells:
             return False
         drawn_points = 0
@@ -2392,17 +2401,18 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             ellipse_count = len(bucket["ellipses"])
             if ellipse_count <= 0:
                 continue
-            max_overlap = max(max_overlap, ellipse_count)
+            position_count = len(bucket["positions"])
+            max_overlap = max(max_overlap, position_count)
             center_x = float(bucket["x"]) / sample_count
             center_y = float(bucket["y"]) / sample_count
             radius = min(
                 MULTI_SELECTION_ECHO_DOT_MAX_RADIUS_PX,
                 MULTI_SELECTION_ECHO_DOT_BASE_RADIUS_PX
-                + ((ellipse_count - 1) * MULTI_SELECTION_ECHO_DOT_OVERLAP_RADIUS_STEP_PX),
+                + ((position_count - 1) * MULTI_SELECTION_ECHO_DOT_OVERLAP_RADIUS_STEP_PX),
             )
             color = (
                 MULTI_SELECTION_ECHO_DOT_OVERLAP_COLOR
-                if ellipse_count > 1
+                if position_count > 1
                 else MULTI_SELECTION_ECHO_DOT_COLOR
             )
             self.map_preview_canvas.create_oval(
