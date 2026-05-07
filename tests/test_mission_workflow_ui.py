@@ -809,11 +809,19 @@ def test_draw_lidar_scan_overlay_deduplicates_dense_endpoints() -> None:
     window._map_preview_offset = (0.0, 0.0)
     window._world_to_map_pixel = lambda *, x, y, image_height: (x, y)
     window._is_pixel_inside_map = lambda *_args, **_kwargs: True
-    line_calls: list[tuple[float, float, float, float]] = []
+    lidar_point_calls: list[tuple[tuple[float, ...], dict[str, object]]] = []
     messages: list[str] = []
+
+    def create_oval(*args, **kwargs):
+        if kwargs.get("fill") == "#fff176":
+            lidar_point_calls.append((args, kwargs))
+
+    def create_line(*_args, **_kwargs):
+        raise AssertionError("LiDAR reference overlay must not draw beam lines")
+
     window.map_preview_canvas = SimpleNamespace(
-        create_oval=lambda *_args, **_kwargs: None,
-        create_line=lambda sx, sy, ex, ey, **_kwargs: line_calls.append((sx, sy, ex, ey)),
+        create_oval=create_oval,
+        create_line=create_line,
     )
     window._append_validation = messages.append
 
@@ -822,10 +830,10 @@ def test_draw_lidar_scan_overlay_deduplicates_dense_endpoints() -> None:
         scan={"angle_min": 0.0, "angle_increment": 0.0, "ranges": [2.0] * 1800},
     )
 
-    assert len(line_calls) == 2
+    assert len(lidar_point_calls) == 2
     assert messages == [
         "ℹ️ LiDAR-Overlay: gültige Ranges=1800, Stride übersprungen=1350, "
-        "Zellfilter übersprungen=448, gezeichnet=2, Zellgröße=2.10px, Stride=4"
+        "Zellfilter übersprungen=448, Punkte gezeichnet=2, Zellgröße=2.10px, Stride=4"
     ]
 
 
@@ -836,11 +844,19 @@ def test_draw_lidar_scan_overlay_adapts_stride_for_large_scan() -> None:
     window._map_preview_offset = (0.0, 0.0)
     window._world_to_map_pixel = lambda *, x, y, image_height: (x, y)
     window._is_pixel_inside_map = lambda *_args, **_kwargs: True
-    line_calls: list[tuple[float, float, float, float]] = []
+    lidar_point_calls: list[tuple[tuple[float, ...], dict[str, object]]] = []
     messages: list[str] = []
+
+    def create_oval(*args, **kwargs):
+        if kwargs.get("fill") == "#fff176":
+            lidar_point_calls.append((args, kwargs))
+
+    def create_line(*_args, **_kwargs):
+        raise AssertionError("LiDAR reference overlay must not draw beam lines")
+
     window.map_preview_canvas = SimpleNamespace(
-        create_oval=lambda *_args, **_kwargs: None,
-        create_line=lambda sx, sy, ex, ey, **_kwargs: line_calls.append((sx, sy, ex, ey)),
+        create_oval=create_oval,
+        create_line=create_line,
     )
     window._append_validation = messages.append
 
@@ -849,10 +865,10 @@ def test_draw_lidar_scan_overlay_adapts_stride_for_large_scan() -> None:
         scan={"angle_min": 0.0, "angle_increment": 0.01, "ranges": [500.0] * 2000},
     )
 
-    assert len(line_calls) <= 700
+    assert len(lidar_point_calls) <= 700
     assert "gültige Ranges=2000" in messages[0]
     assert "Stride übersprungen=1500" in messages[0]
-    assert f"gezeichnet={len(line_calls)}" in messages[0]
+    assert f"Punkte gezeichnet={len(lidar_point_calls)}" in messages[0]
 
 
 def test_build_waypoint_arrow_polygon_points_to_positive_x_for_zero_yaw() -> None:
