@@ -1436,6 +1436,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
 
     def _build_static_map_layer_signature(self, *, canvas_width: int, canvas_height: int) -> tuple[Any, ...]:
         mission_points_signature = tuple((point.id, point.x, point.y, point.yaw) for point in self._mission_points)
+        selected_result_indices_signature = tuple(sorted(getattr(self, "_selected_result_indices", ())))
         return (
             canvas_width,
             canvas_height,
@@ -1443,7 +1444,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             mission_points_signature,
             self._selected_point_index,
             self._selected_result_index,
-            self._selected_result_indices,
+            selected_result_indices_signature,
             self._rx_antenna_global_position,
             self._measurement_start_world_position,
             self._measurement_end_world_position,

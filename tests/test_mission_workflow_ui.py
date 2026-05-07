@@ -207,9 +207,12 @@ def test_static_map_layer_signature_tracks_full_reverse_result_selection() -> No
 
     window._selected_result_indices = (2, 1, 0)
     reverse_selection_signature = window._build_static_map_layer_signature(canvas_width=640, canvas_height=480)
+    window._selected_result_indices = (0, 1, 2)
+    normalized_selection_signature = window._build_static_map_layer_signature(canvas_width=640, canvas_height=480)
 
     assert window._selected_result_index == 0
     assert single_selection_signature != reverse_selection_signature
+    assert reverse_selection_signature == normalized_selection_signature
 
 
 def test_draw_selected_echo_overlay_uses_live_measurement_position() -> None:
