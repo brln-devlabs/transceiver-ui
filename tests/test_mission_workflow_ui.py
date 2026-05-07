@@ -286,6 +286,8 @@ def test_draw_selected_echo_probability_overlay_draws_dot_cloud_without_grid_rec
     window._records = []
     window._mission_points = []
     window.map_preview_canvas = FakeCanvas()
+    window.echo_heatmap_min_visible_overlap_var = SimpleNamespace(get=lambda: "1")
+    window.echo_heatmap_imaginary_line_width_var = SimpleNamespace(get=lambda: "5")
     window._append_validation = lambda _message: None
     records = [
         {
@@ -331,6 +333,7 @@ def test_draw_selected_echo_probability_overlay_scales_overlapping_point_radius(
     window._records = []
     window._mission_points = []
     window.map_preview_canvas = FakeCanvas()
+    window.echo_heatmap_min_visible_overlap_var = SimpleNamespace(get=lambda: "1")
     window._append_validation = lambda _message: None
     records = [
         {
@@ -372,6 +375,7 @@ def test_draw_selected_echo_probability_overlay_does_not_scale_same_position_ove
     window._records = []
     window._mission_points = []
     window.map_preview_canvas = FakeCanvas()
+    window.echo_heatmap_min_visible_overlap_var = SimpleNamespace(get=lambda: "1")
     window._append_validation = lambda _message: None
     records = [
         {
@@ -396,6 +400,63 @@ def test_draw_selected_echo_probability_overlay_does_not_scale_same_position_ove
     radius = (coords[2] - coords[0]) / 2.0
     assert radius == pytest.approx(0.65)
     assert kwargs["fill"] == "#00796B"
+
+
+def test_draw_selected_echo_probability_overlay_uses_configured_min_visible_overlap() -> None:
+    class FakeCanvas:
+        def __init__(self) -> None:
+            self.ovals: list[tuple[tuple[float, ...], dict[str, object]]] = []
+
+        def create_oval(self, *coords: float, **kwargs: object) -> int:
+            self.ovals.append((coords, kwargs))
+            return len(self.ovals)
+
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    window._mission = SimpleNamespace(map_config=SimpleNamespace(resolution=1.0))
+    window._map_image_original = SimpleNamespace(height=lambda: 100)
+    window.map_preview_canvas = FakeCanvas()
+    window.echo_heatmap_min_visible_overlap_var = SimpleNamespace(get=lambda: "3")
+    window.echo_heatmap_imaginary_line_width_var = SimpleNamespace(get=lambda: "4")
+    window._append_validation = lambda _message: None
+    window._build_echo_overlay_preview_points = lambda **_kwargs: ([10.0, 10.0], 1)
+    records = [
+        {
+            "live_position_at_measurement": {"x": float(index), "y": 0.0},
+            "measurement": {"result": {"echo_delays": [{"distance_m": 1.0}]}},
+        }
+        for index in range(2)
+    ]
+
+    drawn = window._draw_selected_echo_probability_overlay(rx_position=(0.0, 0.0), records=records)
+
+    assert drawn is True
+    assert window.map_preview_canvas.ovals == []
+
+
+def test_workflow_state_payload_persists_echo_heatmap_settings() -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    window.repeat_var = SimpleNamespace(get=lambda: "1")
+    window.mission_name_var = SimpleNamespace(get=lambda: "mission-ui")
+    window._mission_points = []
+    window._selected_start_point_index = lambda: 0
+    window.measurements_per_point_var = SimpleNamespace(get=lambda: "1")
+    window._selected_map_config_file = None
+    window._serialize_rx_antenna_global_position = lambda: None
+    window.lidar_reference_enabled_var = SimpleNamespace(get=lambda: True)
+    window.manual_review_enabled_var = SimpleNamespace(get=lambda: True)
+    window.test_run_enabled_var = SimpleNamespace(get=lambda: False)
+    window.manual_navigation_enabled_var = SimpleNamespace(get=lambda: False)
+    window.reverse_point_order_var = SimpleNamespace(get=lambda: False)
+    window.live_pose_stream_enabled_var = SimpleNamespace(get=lambda: False)
+    window.live_preview_enabled_var = SimpleNamespace(get=lambda: False)
+    window.echo_heatmap_imaginary_line_width_var = SimpleNamespace(get=lambda: "6.5")
+    window.echo_heatmap_min_visible_overlap_var = SimpleNamespace(get=lambda: "7")
+    window._records = []
+
+    payload = window._build_workflow_state_payload()
+
+    assert payload["echo_heatmap_imaginary_line_width_px"] == 6.5
+    assert payload["echo_heatmap_min_visible_overlap"] == 7
 
 
 def test_selected_record_overlay_point_prefers_live_yaw() -> None:

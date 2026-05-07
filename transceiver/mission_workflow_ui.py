@@ -102,6 +102,14 @@ def _parse_positive_int(value: Any, *, default: int = 1) -> int:
     return parsed if parsed >= 1 else default
 
 
+def _parse_positive_float(value: Any, *, default: float) -> float:
+    try:
+        parsed = float(str(value).strip().replace(",", "."))
+    except (TypeError, ValueError):
+        return default
+    return parsed if math.isfinite(parsed) and parsed > 0.0 else default
+
+
 def _is_positive_integer_entry_value(value: Any) -> bool:
     text = str(value)
     if text == "":
@@ -109,6 +117,17 @@ def _is_positive_integer_entry_value(value: Any) -> bool:
     if not text.isdecimal():
         return False
     return int(text) >= 1
+
+
+def _is_positive_float_entry_value(value: Any) -> bool:
+    text = str(value).strip().replace(",", ".")
+    if text == "":
+        return True
+    try:
+        parsed = float(text)
+    except ValueError:
+        return False
+    return math.isfinite(parsed) and parsed > 0.0
 
 
 def _map_executor_state_to_ui_text(state: str, completion_substatus: str | None = None) -> str:
@@ -370,6 +389,13 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self.manual_navigation_enabled_var = tk.BooleanVar(value=False)
         self.live_pose_stream_enabled_var = tk.BooleanVar(value=False)
         self.live_preview_enabled_var = tk.BooleanVar(value=False)
+        self.echo_heatmap_imaginary_line_width_var = tk.StringVar(
+            value=f"{MULTI_SELECTION_ECHO_DOT_IMAGINARY_LINE_WIDTH_PX:g}"
+        )
+        self.echo_heatmap_min_visible_overlap_var = tk.StringVar(
+            value=str(MULTI_SELECTION_ECHO_DOT_MIN_VISIBLE_OVERLAP)
+        )
+        self._echo_heatmap_settings_trace_pending = False
         self._live_pose_stream_active = False
 
         self._build_ui()
@@ -381,6 +407,129 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
 
     def _validate_positive_integer_input(self, proposed_value: str) -> bool:
         return _is_positive_integer_entry_value(proposed_value)
+
+    def _validate_positive_float_input(self, proposed_value: str) -> bool:
+        return _is_positive_float_entry_value(proposed_value)
+
+    def _echo_heatmap_imaginary_line_width_px(self) -> float:
+        variable = getattr(self, "echo_heatmap_imaginary_line_width_var", None)
+        value = (
+            variable.get()
+            if variable is not None
+            else MULTI_SELECTION_ECHO_DOT_IMAGINARY_LINE_WIDTH_PX
+        )
+        return _parse_positive_float(
+            value,
+            default=MULTI_SELECTION_ECHO_DOT_IMAGINARY_LINE_WIDTH_PX,
+        )
+
+    def _echo_heatmap_min_visible_overlap(self) -> int:
+        variable = getattr(self, "echo_heatmap_min_visible_overlap_var", None)
+        value = (
+            variable.get()
+            if variable is not None
+            else MULTI_SELECTION_ECHO_DOT_MIN_VISIBLE_OVERLAP
+        )
+        return _parse_positive_int(
+            value,
+            default=MULTI_SELECTION_ECHO_DOT_MIN_VISIBLE_OVERLAP,
+        )
+
+    def _on_echo_heatmap_settings_changed(self) -> None:
+        if getattr(self, "_is_restoring_workflow_state", False):
+            return
+        if getattr(self, "_echo_heatmap_settings_trace_pending", False):
+            return
+        self._echo_heatmap_settings_trace_pending = True
+        try:
+            self.after_idle(self._apply_echo_heatmap_settings_change)
+        except tk.TclError:
+            self._apply_echo_heatmap_settings_change()
+
+    def _apply_echo_heatmap_settings_change(self) -> None:
+        self._echo_heatmap_settings_trace_pending = False
+        self._persist_workflow_state()
+        self._static_map_layer_signature = None
+        self._draw_map_preview()
+
+    def _build_echo_heatmap_settings_overlay(self) -> tk.Frame:
+        frame = tk.Frame(
+            self.map_preview_canvas,
+            bg="#20242a",
+            bd=1,
+            highlightthickness=1,
+            highlightbackground="#5f6b7a",
+            highlightcolor="#5f6b7a",
+        )
+        label_kwargs = {"bg": "#20242a", "fg": "#f5f5f5", "anchor": "w"}
+        entry_kwargs = {
+            "bg": "#ffffff",
+            "fg": "#101010",
+            "insertbackground": "#101010",
+            "relief": "flat",
+        }
+        tk.Label(frame, text="Echo-Heatmap", font=("TkDefaultFont", 9, "bold"), **label_kwargs).grid(
+            row=0, column=0, columnspan=2, sticky="ew", padx=8, pady=(6, 2)
+        )
+        tk.Label(frame, text="Linienstärke px", **label_kwargs).grid(
+            row=1, column=0, sticky="w", padx=8, pady=2
+        )
+        tk.Entry(
+            frame,
+            textvariable=self.echo_heatmap_imaginary_line_width_var,
+            width=7,
+            validate="key",
+            validatecommand=(self.register(self._validate_positive_float_input), "%P"),
+            **entry_kwargs,
+        ).grid(row=1, column=1, sticky="w", padx=(2, 8), pady=2)
+        tk.Label(frame, text="Min. Überlappung", **label_kwargs).grid(
+            row=2, column=0, sticky="w", padx=8, pady=(2, 6)
+        )
+        tk.Entry(
+            frame,
+            textvariable=self.echo_heatmap_min_visible_overlap_var,
+            width=7,
+            validate="key",
+            validatecommand=(self.register(self._validate_positive_integer_input), "%P"),
+            **entry_kwargs,
+        ).grid(row=2, column=1, sticky="w", padx=(2, 8), pady=(2, 6))
+        return frame
+
+    def _sync_echo_heatmap_settings_overlay(self, *, visible: bool) -> None:
+        if not visible:
+            self._hide_echo_heatmap_settings_overlay()
+            return
+        if self._echo_heatmap_settings_frame is None:
+            self._echo_heatmap_settings_frame = self._build_echo_heatmap_settings_overlay()
+        canvas_height = max(1, self.map_preview_canvas.winfo_height())
+        x = 12
+        y = max(12, canvas_height - 12)
+        if self._echo_heatmap_settings_window_id is None:
+            self._echo_heatmap_settings_window_id = int(
+                self.map_preview_canvas.create_window(
+                    x,
+                    y,
+                    anchor="sw",
+                    window=self._echo_heatmap_settings_frame,
+                )
+            )
+        else:
+            self.map_preview_canvas.coords(self._echo_heatmap_settings_window_id, x, y)
+            self.map_preview_canvas.itemconfigure(
+                self._echo_heatmap_settings_window_id,
+                state="normal",
+                window=self._echo_heatmap_settings_frame,
+            )
+        self.map_preview_canvas.tag_raise(self._echo_heatmap_settings_window_id)
+
+    def _hide_echo_heatmap_settings_overlay(self) -> None:
+        window_id = getattr(self, "_echo_heatmap_settings_window_id", None)
+        if window_id is not None:
+            try:
+                self.map_preview_canvas.delete(window_id)
+            except tk.TclError:
+                pass
+        self._echo_heatmap_settings_window_id = None
 
     def _build_ui(self) -> None:
         self.columnconfigure(0, weight=1)
@@ -489,6 +638,12 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self.map_preview_canvas.bind("<Button-1>", self._on_map_canvas_click)
         self.map_preview_canvas.bind("<B1-Motion>", self._on_map_canvas_drag)
         self.map_preview_canvas.bind("<ButtonRelease-1>", self._on_map_canvas_release)
+        self.echo_heatmap_imaginary_line_width_var.trace_add(
+            "write", lambda *_args: self._on_echo_heatmap_settings_changed()
+        )
+        self.echo_heatmap_min_visible_overlap_var.trace_add(
+            "write", lambda *_args: self._on_echo_heatmap_settings_changed()
+        )
         self._map_image_original: tk.PhotoImage | None = None
         self._map_image_preview: tk.PhotoImage | None = None
         self._map_preview_scale: tuple[float, float] = (1.0, 1.0)
@@ -502,6 +657,8 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             "position_info_box": None,
             "position_info_text": None,
         }
+        self._echo_heatmap_settings_frame: tk.Frame | None = None
+        self._echo_heatmap_settings_window_id: int | None = None
         self._static_map_layer_signature: tuple[Any, ...] | None = None
         self._map_image_size: tuple[int, int] | None = None
         self._live_position: dict[str, Any] | None = None
@@ -935,6 +1092,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             "position_info_box": None,
             "position_info_text": None,
         }
+        self._hide_echo_heatmap_settings_overlay()
         self._static_map_layer_signature = None
         self._invalidate_live_echo_geometry_cache()
         self._map_image_size = None
@@ -1405,6 +1563,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             "position_info_box": None,
             "position_info_text": None,
         }
+        self._hide_echo_heatmap_settings_overlay()
         self._static_map_layer_signature = None
         self._invalidate_live_echo_geometry_cache()
         self.map_preview_canvas.create_text(
@@ -1448,6 +1607,8 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             self._rx_antenna_global_position,
             self._measurement_start_world_position,
             self._measurement_end_world_position,
+            self._echo_heatmap_imaginary_line_width_px(),
+            self._echo_heatmap_min_visible_overlap(),
             self._pending_nav2point_world_position,
             self._pending_nav2point_yaw_radians,
             self._pending_waypoint_world_position,
@@ -1474,6 +1635,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             "position_info_box": None,
             "position_info_text": None,
         }
+        self._hide_echo_heatmap_settings_overlay()
         self._invalidate_live_echo_geometry_cache()
         self._map_canvas_image_id = self.map_preview_canvas.create_image(offset_x, offset_y, anchor="nw", image=preview)
         self._draw_mission_markers()
@@ -1481,8 +1643,9 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._draw_pending_waypoint_marker()
         self._draw_rx_antenna_marker()
         self._draw_measurement_overlay()
-        self._draw_selected_echo_overlay()
+        echo_heatmap_active = self._draw_selected_echo_overlay()
         self._draw_selected_lidar_reference_overlay()
+        self._sync_echo_heatmap_settings_overlay(visible=echo_heatmap_active)
 
     def _draw_live_overlay_layer(self) -> None:
         self._draw_live_echo_preview_overlay()
@@ -2327,16 +2490,16 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         }
         return (preview_points, line_width)
 
-    def _draw_selected_echo_overlay(self) -> None:
+    def _draw_selected_echo_overlay(self) -> bool:
         rx_position = self._rx_antenna_global_position
         if rx_position is None:
-            return
+            return False
         selected_records = self._selected_record_payloads()
         if len(selected_records) > 1 and self._draw_selected_echo_probability_overlay(
             rx_position=rx_position,
             records=selected_records,
         ):
-            return
+            return True
         for record in selected_records:
             measurement_position = self._selected_record_measurement_position(record)
             if measurement_position is None:
@@ -2358,6 +2521,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                     echo_distance_m=echo_distance,
                     color=color,
                 )
+        return False
 
     def _draw_selected_echo_probability_overlay(
         self,
@@ -2373,7 +2537,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         if not math.isfinite(resolution) or resolution <= 0.0:
             return False
         ellipse_point_cells: dict[tuple[int, int], dict[str, Any]] = {}
-        imaginary_line_width_px = MULTI_SELECTION_ECHO_DOT_IMAGINARY_LINE_WIDTH_PX
+        imaginary_line_width_px = self._echo_heatmap_imaginary_line_width_px()
         if not math.isfinite(imaginary_line_width_px) or imaginary_line_width_px <= 0.0:
             imaginary_line_width_px = 0.5
         candidate_count = 0
@@ -2443,7 +2607,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 continue
             position_count = len(bucket["positions"])
             max_overlap = max(max_overlap, position_count)
-            if position_count < MULTI_SELECTION_ECHO_DOT_MIN_VISIBLE_OVERLAP:
+            if position_count < self._echo_heatmap_min_visible_overlap():
                 continue
             center_x = float(bucket["x"]) / sample_count
             center_y = float(bucket["y"]) / sample_count
@@ -2469,7 +2633,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         if MULTI_SELECTION_PROBABILITY_DEBUG_LOG:
             self._append_validation(
                 "ℹ️ Echo-Heatmap: "
-                f"{drawn_points} Punktzellen ab {MULTI_SELECTION_ECHO_DOT_MIN_VISIBLE_OVERLAP} Überlagerungen "
+                f"{drawn_points} Punktzellen ab {self._echo_heatmap_min_visible_overlap()} Überlagerungen "
                 f"aus {sampled_point_count} Ellipsenpunkten gezeichnet "
                 f"({candidate_count} Ellipsen, imaginäre Linienstärke={imaginary_line_width_px:.1f}px, "
                 f"max. Überlagerung={max_overlap})."
@@ -3525,6 +3689,8 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             "reverse_point_order": bool(self.reverse_point_order_var.get()),
             "live_pose_stream_enabled": bool(self.live_pose_stream_enabled_var.get()),
             "live_preview_enabled": bool(self.live_preview_enabled_var.get()),
+            "echo_heatmap_imaginary_line_width_px": self._echo_heatmap_imaginary_line_width_px(),
+            "echo_heatmap_min_visible_overlap": self._echo_heatmap_min_visible_overlap(),
             "records": self._records,
         }
 
@@ -3612,6 +3778,20 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             self.reverse_point_order_var.set(bool(payload.get("reverse_point_order", False)))
             self.live_pose_stream_enabled_var.set(bool(payload.get("live_pose_stream_enabled", False)))
             self.live_preview_enabled_var.set(bool(payload.get("live_preview_enabled", False)))
+            self.echo_heatmap_imaginary_line_width_var.set(
+                f"{_parse_positive_float(
+                    payload.get('echo_heatmap_imaginary_line_width_px'),
+                    default=MULTI_SELECTION_ECHO_DOT_IMAGINARY_LINE_WIDTH_PX,
+                ):g}"
+            )
+            self.echo_heatmap_min_visible_overlap_var.set(
+                str(
+                    _parse_positive_int(
+                        payload.get("echo_heatmap_min_visible_overlap"),
+                        default=MULTI_SELECTION_ECHO_DOT_MIN_VISIBLE_OVERLAP,
+                    )
+                )
+            )
             self._refresh_points_table()
             self._refresh_map_section()
             persisted_start_point = payload.get("start_point_index")
