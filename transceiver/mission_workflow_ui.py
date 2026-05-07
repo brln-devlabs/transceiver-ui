@@ -3778,11 +3778,12 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             self.reverse_point_order_var.set(bool(payload.get("reverse_point_order", False)))
             self.live_pose_stream_enabled_var.set(bool(payload.get("live_pose_stream_enabled", False)))
             self.live_preview_enabled_var.set(bool(payload.get("live_preview_enabled", False)))
+            echo_heatmap_imaginary_line_width_px = _parse_positive_float(
+                payload.get("echo_heatmap_imaginary_line_width_px"),
+                default=MULTI_SELECTION_ECHO_DOT_IMAGINARY_LINE_WIDTH_PX,
+            )
             self.echo_heatmap_imaginary_line_width_var.set(
-                f"{_parse_positive_float(
-                    payload.get('echo_heatmap_imaginary_line_width_px'),
-                    default=MULTI_SELECTION_ECHO_DOT_IMAGINARY_LINE_WIDTH_PX,
-                ):g}"
+                f"{echo_heatmap_imaginary_line_width_px:g}"
             )
             self.echo_heatmap_min_visible_overlap_var.set(
                 str(
