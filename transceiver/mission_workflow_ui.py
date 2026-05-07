@@ -66,7 +66,7 @@ LIVE_ECHO_CACHE_POSITION_DELTA_M = 0.015
 LIVE_ECHO_CACHE_DISTANCE_DELTA_M = 0.02
 LIVE_ECHO_SAMPLING_NORMAL = (24, 32, 48)
 LIVE_ECHO_SAMPLING_REDUCED = (16, 24, 32)
-MULTI_SELECTION_ECHO_DOT_IMAGINARY_LINE_WIDTH_PX = 1.0
+MULTI_SELECTION_ECHO_DOT_IMAGINARY_LINE_WIDTH_PX = 2.0
 MULTI_SELECTION_ECHO_DOT_BASE_RADIUS_PX = 0.65
 MULTI_SELECTION_ECHO_DOT_OVERLAP_RADIUS_STEP_PX = 0.45
 MULTI_SELECTION_ECHO_DOT_MAX_RADIUS_PX = 5.0
@@ -1442,7 +1442,6 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             mission_points_signature,
             self._selected_point_index,
             self._selected_result_index,
-            tuple(getattr(self, "_selected_result_indices", ())),
             self._rx_antenna_global_position,
             self._measurement_start_world_position,
             self._measurement_end_world_position,
