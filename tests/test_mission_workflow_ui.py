@@ -169,6 +169,49 @@ def test_selected_record_measurement_position_returns_none_without_live_coordina
     assert position is None
 
 
+def _window_for_static_map_layer_signature() -> MissionWorkflowWindow:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    window._mission_points = [MeasurementPoint(id="p0", name="P0", x=1.0, y=2.0, yaw=0.0)]
+    window._map_image_original = object()
+    window._selected_point_index = None
+    window._selected_result_index = None
+    window._selected_result_indices = ()
+    window._rx_antenna_global_position = None
+    window._measurement_start_world_position = None
+    window._measurement_end_world_position = None
+    window._pending_nav2point_world_position = None
+    window._pending_nav2point_yaw_radians = None
+    window._pending_waypoint_world_position = None
+    window._pending_waypoint_yaw_radians = None
+    return window
+
+
+def test_static_map_layer_signature_tracks_full_forward_result_selection() -> None:
+    window = _window_for_static_map_layer_signature()
+    window._selected_result_index = 0
+    window._selected_result_indices = (0,)
+    single_selection_signature = window._build_static_map_layer_signature(canvas_width=640, canvas_height=480)
+
+    window._selected_result_indices = (0, 1, 2)
+    multi_selection_signature = window._build_static_map_layer_signature(canvas_width=640, canvas_height=480)
+
+    assert window._selected_result_index == 0
+    assert single_selection_signature != multi_selection_signature
+
+
+def test_static_map_layer_signature_tracks_full_reverse_result_selection() -> None:
+    window = _window_for_static_map_layer_signature()
+    window._selected_result_index = 0
+    window._selected_result_indices = (0,)
+    single_selection_signature = window._build_static_map_layer_signature(canvas_width=640, canvas_height=480)
+
+    window._selected_result_indices = (2, 1, 0)
+    reverse_selection_signature = window._build_static_map_layer_signature(canvas_width=640, canvas_height=480)
+
+    assert window._selected_result_index == 0
+    assert single_selection_signature != reverse_selection_signature
+
+
 def test_draw_selected_echo_overlay_uses_live_measurement_position() -> None:
     window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
     window._selected_result_index = 0
