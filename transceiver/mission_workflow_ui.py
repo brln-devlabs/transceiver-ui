@@ -2813,8 +2813,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         start_x = start_map_pixel[0] * scale_x + offset_x
         start_y = start_map_pixel[1] * scale_y + offset_y
         preview_scale = max(scale_x, scale_y)
-        lidar_beam_width = max(2, min(4, int(round(2.0 * max(1.0, preview_scale)))))
-        lidar_hit_marker_radius = max(2.0, min(4.0, lidar_beam_width + 0.5))
+        lidar_hit_marker_radius = max(2.0, min(4.0, 2.5 * max(1.0, preview_scale)))
         self.map_preview_canvas.create_oval(
             start_x - 5,
             start_y - 5,
@@ -2878,14 +2877,6 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 skipped_by_cell_filter_count += 1
                 continue
             drawn_beam_cells[beam_cell] = current_cell_count + 1
-            self.map_preview_canvas.create_line(
-                start_x,
-                start_y,
-                end_x,
-                end_y,
-                fill="#ffb300",
-                width=lidar_beam_width,
-            )
             self.map_preview_canvas.create_oval(
                 end_x - lidar_hit_marker_radius,
                 end_y - lidar_hit_marker_radius,
@@ -2901,7 +2892,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             f"gültige Ranges={finite_positive_beam_count}, "
             f"Stride übersprungen={skipped_by_stride_count}, "
             f"Zellfilter übersprungen={skipped_by_cell_filter_count}, "
-            f"gezeichnet={drawn_beam_count}, "
+            f"Punkte gezeichnet={drawn_beam_count}, "
             f"Zellgröße={effective_cell_size_px:.2f}px, "
             f"Stride={beam_stride}"
         )
