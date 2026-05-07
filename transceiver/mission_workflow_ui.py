@@ -2744,6 +2744,9 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         return points
 
     def _draw_selected_lidar_reference_overlay(self) -> None:
+        selected_indices = getattr(self, "_selected_result_indices", ())
+        if len(selected_indices) > 1:
+            return
         record = self._selected_record_payload()
         if record is None:
             return

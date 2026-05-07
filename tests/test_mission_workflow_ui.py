@@ -391,6 +391,35 @@ def test_draw_selected_lidar_reference_overlay_uses_live_measurement_position() 
     assert point.y == -2.0
 
 
+def test_draw_selected_lidar_reference_overlay_skips_multiple_selected_results() -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    window._selected_result_index = 0
+    window._selected_result_indices = (0, 1)
+    window._records = [
+        {
+            "point_index": 0,
+            "live_position_at_measurement": {"x": 7.0, "y": -2.0, "yaw": 0.25},
+            "measurement": {"result": {"lidar_reference": {"output_file": "scan.yaml"}}},
+        },
+        {
+            "point_index": 1,
+            "live_position_at_measurement": {"x": 8.0, "y": -1.0, "yaw": 0.5},
+            "measurement": {"result": {"lidar_reference": {"output_file": "scan-2.yaml"}}},
+        },
+    ]
+    window._mission_points = [
+        MeasurementPoint(id="p0", name="P0", x=50.0, y=50.0, yaw=0.0),
+        MeasurementPoint(id="p1", name="P1", x=60.0, y=60.0, yaw=0.0),
+    ]
+    window._load_lidar_scan_for_overlay = lambda _path: {"angle_min": 0.0, "angle_increment": 0.1, "ranges": [1.0]}
+    calls: list[dict[str, object]] = []
+    window._draw_lidar_scan_overlay_for_point = lambda **kwargs: calls.append(kwargs)
+
+    window._draw_selected_lidar_reference_overlay()
+
+    assert calls == []
+
+
 def test_resolve_cmd_vel_topic_uses_namespace_when_present() -> None:
     window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
     window._runtime_config = SimpleNamespace(ros2_namespace="robot1")
