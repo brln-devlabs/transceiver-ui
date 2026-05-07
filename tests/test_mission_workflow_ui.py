@@ -7,7 +7,11 @@ import pytest
 
 from transceiver.measurement_mission import MeasurementMission, MeasurementPoint
 from transceiver.navigation_adapter import NavigationPoint
-from transceiver.mission_workflow_ui import MissionWorkflowWindow, _compute_bistatic_echo_ellipse_axes
+from transceiver.mission_workflow_ui import (
+    RESULTS_TABLE_EMPTY_ROW_IID,
+    MissionWorkflowWindow,
+    _compute_bistatic_echo_ellipse_axes,
+)
 
 
 def test_format_echo_distances_for_table_returns_only_meter_values_for_first_five_echoes() -> None:
@@ -550,6 +554,49 @@ def test_on_results_table_select_updates_multi_selection_and_diagnostics() -> No
     assert window._selected_result_indices == (0, 1, 2)
     assert window._selected_result_index == 0
     assert window.results_selection_diagnostics_var.value == "Auswahl: 3 Zeilen"
+    assert draw_calls == ["draw"]
+
+
+def test_on_results_table_select_ignores_empty_trailing_row() -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    table = _TreeviewSelectionStub()
+    table._selected = ("row-a", RESULTS_TABLE_EMPTY_ROW_IID)
+    table._indices = {"row-a": 0, RESULTS_TABLE_EMPTY_ROW_IID: 1}
+    window.results_table = table
+    window.results_selection_diagnostics_var = _StringVarStub()
+    draw_calls: list[str] = []
+    window._draw_map_preview = lambda: draw_calls.append("draw")
+
+    window._on_results_table_select(SimpleNamespace())
+
+    assert table.selection() == ("row-a",)
+    assert window._selected_result_indices == (0,)
+    assert window._selected_result_index == 0
+    assert window.results_selection_diagnostics_var.value == "Auswahl: 1 Zeilen"
+    assert draw_calls == ["draw"]
+
+
+def test_on_results_table_click_on_empty_row_clears_multiselect() -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    table = _TreeviewSelectionStub()
+    table._selected = ("row-a", "row-b")
+    table._indices = {"row-a": 0, "row-b": 1, RESULTS_TABLE_EMPTY_ROW_IID: 2}
+    table._region = "cell"
+    table._row_id = RESULTS_TABLE_EMPTY_ROW_IID
+    window.results_table = table
+    window._selected_result_index = 0
+    window._selected_result_indices = (0, 1)
+    window.results_selection_diagnostics_var = _StringVarStub()
+    draw_calls: list[str] = []
+    window._draw_map_preview = lambda: draw_calls.append("draw")
+
+    result = window._on_results_table_click(SimpleNamespace(x=5, y=5))
+
+    assert result == "break"
+    assert table.selection() == ()
+    assert window._selected_result_indices == ()
+    assert window._selected_result_index is None
+    assert window.results_selection_diagnostics_var.value == "Auswahl: 0 Zeilen"
     assert draw_calls == ["draw"]
 
 
