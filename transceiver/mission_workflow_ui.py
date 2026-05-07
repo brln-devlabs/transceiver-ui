@@ -66,11 +66,13 @@ LIVE_ECHO_CACHE_POSITION_DELTA_M = 0.015
 LIVE_ECHO_CACHE_DISTANCE_DELTA_M = 0.02
 LIVE_ECHO_SAMPLING_NORMAL = (24, 32, 48)
 LIVE_ECHO_SAMPLING_REDUCED = (16, 24, 32)
-MULTI_SELECTION_PROBABILITY_SIGMA_M = 1.5
-MULTI_SELECTION_PROBABILITY_GRID_STEP_PX = 10
-MULTI_SELECTION_PROBABILITY_MIN_NORMALIZED = 0.05
-MULTI_SELECTION_PROBABILITY_MIN_HEAT = 0.2
-MULTI_SELECTION_PROBABILITY_USE_STIPPLE = False
+MULTI_SELECTION_ECHO_DOT_IMAGINARY_LINE_WIDTH_PX = 0.5
+MULTI_SELECTION_ECHO_DOT_BASE_RADIUS_PX = 0.65
+MULTI_SELECTION_ECHO_DOT_OVERLAP_RADIUS_STEP_PX = 0.45
+MULTI_SELECTION_ECHO_DOT_MAX_RADIUS_PX = 5.0
+MULTI_SELECTION_ECHO_DOT_COLOR = "#00796B"
+MULTI_SELECTION_ECHO_DOT_OVERLAP_COLOR = "#F4511E"
+MULTI_SELECTION_ECHO_DOT_SAMPLE_LEVELS = (96, 160, 240)
 MULTI_SELECTION_PROBABILITY_DEBUG_LOG = True
 
 
@@ -2330,11 +2332,12 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         resolution = mission.map_config.resolution
         if not math.isfinite(resolution) or resolution <= 0.0:
             return False
-        sigma_sq = MULTI_SELECTION_PROBABILITY_SIGMA_M * MULTI_SELECTION_PROBABILITY_SIGMA_M
-        if sigma_sq <= 0.0 or not math.isfinite(sigma_sq):
-            return False
-        rx_x, rx_y = rx_position
-        candidates: list[tuple[tuple[float, float], float]] = []
+        ellipse_point_cells: dict[tuple[int, int], dict[str, Any]] = {}
+        imaginary_line_width_px = MULTI_SELECTION_ECHO_DOT_IMAGINARY_LINE_WIDTH_PX
+        if not math.isfinite(imaginary_line_width_px) or imaginary_line_width_px <= 0.0:
+            imaginary_line_width_px = 0.5
+        candidate_count = 0
+        sampled_point_count = 0
         for record in records:
             measurement_position = self._selected_record_measurement_position(record)
             if measurement_position is None:
@@ -2348,67 +2351,77 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             echo_distances = self._extract_echo_distances(result.get("echo_delays"), limit=1)
             if not echo_distances:
                 continue
-            point_x, point_y = measurement_position
-            rho_i = math.hypot(point_x - rx_x, point_y - rx_y) + echo_distances[0]
-            if not math.isfinite(rho_i) or rho_i <= 0.0:
-                continue
-            candidates.append((measurement_position, rho_i))
-        if not candidates:
-            return False
-        step_px = max(4, int(MULTI_SELECTION_PROBABILITY_GRID_STEP_PX))
-        canvas_width = max(1, self.map_preview_canvas.winfo_width())
-        canvas_height = max(1, self.map_preview_canvas.winfo_height())
-        values: list[tuple[float, float, float]] = []
-        max_value = 0.0
-        for py in range(0, canvas_height, step_px):
-            for px in range(0, canvas_width, step_px):
-                world_pos = self._preview_pixel_to_world(preview_x=px + (step_px / 2.0), preview_y=py + (step_px / 2.0))
-                if world_pos is None:
-                    continue
-                world_x, world_y = world_pos
-                value = 0.0
-                for (s_x, s_y), rho_i in candidates:
-                    residual = math.hypot(world_x - s_x, world_y - s_y) + math.hypot(world_x - rx_x, world_y - rx_y) - rho_i
-                    value += math.exp(-((residual * residual) / (2.0 * sigma_sq)))
-                if value <= 0.0 or not math.isfinite(value):
-                    continue
-                max_value = max(max_value, value)
-                values.append((float(px), float(py), value))
-        if max_value <= 0.0:
-            return False
-        total_cells = len(values)
-        drawn_cells = 0
-        for px, py, value in values:
-            normalized = value / max_value
-            if normalized < MULTI_SELECTION_PROBABILITY_MIN_NORMALIZED:
-                continue
-            heat = min(1.0, max(MULTI_SELECTION_PROBABILITY_MIN_HEAT, normalized))
-            red = int(round(255 * heat))
-            green = int(round(180 * (1.0 - heat)))
-            blue = int(round(48 * (1.0 - heat)))
-            rectangle_kwargs: dict[str, Any] = {
-                "fill": f"#{red:02x}{green:02x}{blue:02x}",
-                "outline": "",
-            }
-            if MULTI_SELECTION_PROBABILITY_USE_STIPPLE:
-                rectangle_kwargs["stipple"] = "gray50"
-            self.map_preview_canvas.create_rectangle(
-                px,
-                py,
-                px + step_px,
-                py + step_px,
-                **rectangle_kwargs,
+            preview_points, _line_width = self._build_echo_overlay_preview_points(
+                rx_position=rx_position,
+                measurement_position=measurement_position,
+                echo_distance_m=echo_distances[0],
+                sample_levels=MULTI_SELECTION_ECHO_DOT_SAMPLE_LEVELS,
             )
-            drawn_cells += 1
+            if preview_points is None:
+                continue
+            candidate_count += 1
+            seen_cells_for_ellipse: set[tuple[int, int]] = set()
+            point_pairs = zip(preview_points[0::2], preview_points[1::2])
+            for px, py in point_pairs:
+                if not math.isfinite(px) or not math.isfinite(py):
+                    continue
+                cell = (
+                    int(round(px / imaginary_line_width_px)),
+                    int(round(py / imaginary_line_width_px)),
+                )
+                if cell in seen_cells_for_ellipse:
+                    continue
+                seen_cells_for_ellipse.add(cell)
+                sampled_point_count += 1
+                bucket = ellipse_point_cells.setdefault(
+                    cell,
+                    {"x": 0.0, "y": 0.0, "samples": 0, "ellipses": set()},
+                )
+                bucket["x"] += float(px)
+                bucket["y"] += float(py)
+                bucket["samples"] += 1
+                bucket["ellipses"].add(candidate_count)
+        if not ellipse_point_cells:
+            return False
+        drawn_points = 0
+        max_overlap = 0
+        for bucket in ellipse_point_cells.values():
+            sample_count = int(bucket["samples"])
+            if sample_count <= 0:
+                continue
+            ellipse_count = len(bucket["ellipses"])
+            if ellipse_count <= 0:
+                continue
+            max_overlap = max(max_overlap, ellipse_count)
+            center_x = float(bucket["x"]) / sample_count
+            center_y = float(bucket["y"]) / sample_count
+            radius = min(
+                MULTI_SELECTION_ECHO_DOT_MAX_RADIUS_PX,
+                MULTI_SELECTION_ECHO_DOT_BASE_RADIUS_PX
+                + ((ellipse_count - 1) * MULTI_SELECTION_ECHO_DOT_OVERLAP_RADIUS_STEP_PX),
+            )
+            color = (
+                MULTI_SELECTION_ECHO_DOT_OVERLAP_COLOR
+                if ellipse_count > 1
+                else MULTI_SELECTION_ECHO_DOT_COLOR
+            )
+            self.map_preview_canvas.create_oval(
+                center_x - radius,
+                center_y - radius,
+                center_x + radius,
+                center_y + radius,
+                fill=color,
+                outline="",
+            )
+            drawn_points += 1
         if MULTI_SELECTION_PROBABILITY_DEBUG_LOG:
             self._append_validation(
                 "ℹ️ Echo-Heatmap: "
-                f"{drawn_cells}/{total_cells} Zellen gezeichnet "
-                f"(min_norm={MULTI_SELECTION_PROBABILITY_MIN_NORMALIZED:.2f}, "
-                f"min_heat={MULTI_SELECTION_PROBABILITY_MIN_HEAT:.2f}, "
-                f"stipple={'an' if MULTI_SELECTION_PROBABILITY_USE_STIPPLE else 'aus'})."
+                f"{drawn_points} Punktzellen aus {sampled_point_count} Ellipsenpunkten gezeichnet "
+                f"({candidate_count} Ellipsen, imaginäre Linienstärke={imaginary_line_width_px:.1f}px, "
+                f"max. Überlagerung={max_overlap})."
             )
-        return drawn_cells > 0
+        return drawn_points > 0
 
     def _draw_live_echo_preview_overlay(self) -> None:
         if not bool(self.live_preview_enabled_var.get()):
