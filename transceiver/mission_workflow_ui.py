@@ -1443,6 +1443,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             mission_points_signature,
             self._selected_point_index,
             self._selected_result_index,
+            self._selected_result_indices,
             self._rx_antenna_global_position,
             self._measurement_start_world_position,
             self._measurement_end_world_position,
