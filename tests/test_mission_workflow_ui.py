@@ -455,7 +455,7 @@ def test_workflow_state_payload_persists_echo_heatmap_settings() -> None:
 
     payload = window._build_workflow_state_payload()
 
-    assert payload["echo_heatmap_imaginary_line_width_px"] == 6.5
+    assert payload["echo_heatmap_imaginary_line_width_cm"] == 6.5
     assert payload["echo_heatmap_min_visible_overlap"] == 7
 
 

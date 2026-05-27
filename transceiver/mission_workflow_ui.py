@@ -391,7 +391,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self.live_pose_stream_enabled_var = tk.BooleanVar(value=False)
         self.live_preview_enabled_var = tk.BooleanVar(value=False)
         self.echo_heatmap_imaginary_line_width_var = tk.StringVar(
-            value=f"{MULTI_SELECTION_ECHO_DOT_IMAGINARY_LINE_WIDTH_PX:g}"
+            value=f"{(MULTI_SELECTION_ECHO_DOT_IMAGINARY_LINE_WIDTH_PX * 100.0):g}"
         )
         self.echo_heatmap_min_visible_overlap_var = tk.StringVar(
             value=str(MULTI_SELECTION_ECHO_DOT_MIN_VISIBLE_OVERLAP)
@@ -415,16 +415,16 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
     def _validate_positive_float_input(self, proposed_value: str) -> bool:
         return _is_positive_float_entry_value(proposed_value)
 
-    def _echo_heatmap_imaginary_line_width_px(self) -> float:
+    def _echo_heatmap_imaginary_line_width_cm(self) -> float:
         variable = getattr(self, "echo_heatmap_imaginary_line_width_var", None)
         value = (
             variable.get()
             if variable is not None
-            else MULTI_SELECTION_ECHO_DOT_IMAGINARY_LINE_WIDTH_PX
+            else (MULTI_SELECTION_ECHO_DOT_IMAGINARY_LINE_WIDTH_PX * 100.0)
         )
         return _parse_positive_float(
             value,
-            default=MULTI_SELECTION_ECHO_DOT_IMAGINARY_LINE_WIDTH_PX,
+            default=(MULTI_SELECTION_ECHO_DOT_IMAGINARY_LINE_WIDTH_PX * 100.0),
         )
 
     def _echo_heatmap_min_visible_overlap(self) -> int:
@@ -488,7 +488,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         tk.Label(frame, text="Echo-Heatmap", font=("TkDefaultFont", 9, "bold"), **label_kwargs).grid(
             row=0, column=0, columnspan=2, sticky="ew", padx=8, pady=(6, 2)
         )
-        tk.Label(frame, text="Linienstärke px", **label_kwargs).grid(
+        tk.Label(frame, text="Linienstärke cm", **label_kwargs).grid(
             row=1, column=0, sticky="w", padx=8, pady=2
         )
         tk.Entry(
@@ -1279,7 +1279,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             return
         if not self._is_pixel_inside_map(map_pixel[0], map_pixel[1], width=original.width(), height=original.height()):
             return
-        scale_x, scale_y = self._map_preview_scale
+        scale_x, scale_y = getattr(self, "_map_preview_scale", (1.0, 1.0))
         offset_x, offset_y = self._map_preview_offset
         px = map_pixel[0] * scale_x + offset_x
         py = map_pixel[1] * scale_y + offset_y
@@ -1309,7 +1309,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             return
         if not self._is_pixel_inside_map(map_pixel[0], map_pixel[1], width=original.width(), height=original.height()):
             return
-        scale_x, scale_y = self._map_preview_scale
+        scale_x, scale_y = getattr(self, "_map_preview_scale", (1.0, 1.0))
         offset_x, offset_y = self._map_preview_offset
         px = map_pixel[0] * scale_x + offset_x
         py = map_pixel[1] * scale_y + offset_y
@@ -1479,7 +1479,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         if not self._is_pixel_inside_map(end_pixel[0], end_pixel[1], width=original.width(), height=original.height()):
             return
 
-        scale_x, scale_y = self._map_preview_scale
+        scale_x, scale_y = getattr(self, "_map_preview_scale", (1.0, 1.0))
         offset_x, offset_y = self._map_preview_offset
         start_preview = (start_pixel[0] * scale_x + offset_x, start_pixel[1] * scale_y + offset_y)
         end_preview = (end_pixel[0] * scale_x + offset_x, end_pixel[1] * scale_y + offset_y)
@@ -1638,7 +1638,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             self._rx_antenna_global_position,
             self._measurement_start_world_position,
             self._measurement_end_world_position,
-            self._echo_heatmap_imaginary_line_width_px(),
+            self._echo_heatmap_imaginary_line_width_cm(),
             self._echo_heatmap_min_visible_overlap(),
             self._pending_nav2point_world_position,
             self._pending_nav2point_yaw_radians,
@@ -1726,7 +1726,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             return
         if not self._is_pixel_inside_map(map_pixel[0], map_pixel[1], width=original.width(), height=original.height()):
             return
-        scale_x, scale_y = self._map_preview_scale
+        scale_x, scale_y = getattr(self, "_map_preview_scale", (1.0, 1.0))
         offset_x, offset_y = self._map_preview_offset
         px = map_pixel[0] * scale_x + offset_x
         py = map_pixel[1] * scale_y + offset_y
@@ -1751,7 +1751,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         if mission is None or mission.map_config is None or preview is None or original is None:
             return
 
-        scale_x, scale_y = self._map_preview_scale
+        scale_x, scale_y = getattr(self, "_map_preview_scale", (1.0, 1.0))
         offset_x, offset_y = self._map_preview_offset
 
         for index, point in enumerate(self._mission_points):
@@ -1850,7 +1850,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         original = getattr(self, "_map_image_original", None)
         if mission is None or mission.map_config is None or original is None:
             return None
-        scale_x, scale_y = self._map_preview_scale
+        scale_x, scale_y = getattr(self, "_map_preview_scale", (1.0, 1.0))
         if scale_x <= 0.0 or scale_y <= 0.0:
             return None
         offset_x, offset_y = self._map_preview_offset
@@ -2437,7 +2437,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         resolution: float,
         image_height: int,
     ) -> tuple[float, ...]:
-        scale_x, scale_y = self._map_preview_scale
+        scale_x, scale_y = getattr(self, "_map_preview_scale", (1.0, 1.0))
         offset_x, offset_y = self._map_preview_offset
         return (
             float(rx_position[0]),
@@ -2568,9 +2568,13 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         if not math.isfinite(resolution) or resolution <= 0.0:
             return False
         ellipse_point_cells: dict[tuple[int, int], dict[str, Any]] = {}
-        imaginary_line_width_px = self._echo_heatmap_imaginary_line_width_px()
-        if not math.isfinite(imaginary_line_width_px) or imaginary_line_width_px <= 0.0:
-            imaginary_line_width_px = 0.5
+        imaginary_line_width_cm = self._echo_heatmap_imaginary_line_width_cm()
+        if not math.isfinite(imaginary_line_width_cm) or imaginary_line_width_cm <= 0.0:
+            imaginary_line_width_cm = 0.5
+        scale_x, scale_y = getattr(self, "_map_preview_scale", (1.0, 1.0))
+        preview_scale = max(0.01, (abs(float(scale_x)) + abs(float(scale_y))) / 2.0)
+        line_width_m = imaginary_line_width_cm / 100.0
+        imaginary_line_width_px = max(0.5, (line_width_m / resolution) * preview_scale)
         candidate_count = 0
         sampled_point_count = 0
         opening_angle_deg = self._echo_heatmap_antenna_opening_angle_deg()
@@ -2683,7 +2687,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 "ℹ️ Echo-Heatmap: "
                 f"{drawn_points} Punktzellen ab {self._echo_heatmap_min_visible_overlap()} Überlagerungen "
                 f"aus {sampled_point_count} Ellipsenpunkten gezeichnet "
-                f"({candidate_count} Ellipsen, imaginäre Linienstärke={imaginary_line_width_px:.1f}px, "
+                f"({candidate_count} Ellipsen, imaginäre Linienstärke={imaginary_line_width_cm:.1f}cm, "
                 f"max. Überlagerung={max_overlap})."
             )
         return sampled_point_count > 0
@@ -2905,7 +2909,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         if semi_minor_axis <= 0.0:
             return (None, 1)
         image_height = original.height()
-        scale_x, scale_y = self._map_preview_scale
+        scale_x, scale_y = getattr(self, "_map_preview_scale", (1.0, 1.0))
         offset_x, offset_y = self._map_preview_offset
         preview_scale_factor = (abs(scale_x) + abs(scale_y)) / 2.0
         if not math.isfinite(preview_scale_factor) or preview_scale_factor <= 0.0:
@@ -3113,7 +3117,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             return
         if not self._is_pixel_inside_map(start_map_pixel[0], start_map_pixel[1], width=original.width(), height=original.height()):
             return
-        scale_x, scale_y = self._map_preview_scale
+        scale_x, scale_y = getattr(self, "_map_preview_scale", (1.0, 1.0))
         offset_x, offset_y = self._map_preview_offset
         start_x = start_map_pixel[0] * scale_x + offset_x
         start_y = start_map_pixel[1] * scale_y + offset_y
@@ -3231,7 +3235,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             self._clear_live_overlay_layer(components=("marker", "heading"))
             return
 
-        scale_x, scale_y = self._map_preview_scale
+        scale_x, scale_y = getattr(self, "_map_preview_scale", (1.0, 1.0))
         offset_x, offset_y = self._map_preview_offset
         map_pixel = self._world_to_map_pixel(
             x=float(x_value),
@@ -3761,7 +3765,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             "reverse_point_order": bool(self.reverse_point_order_var.get()),
             "live_pose_stream_enabled": bool(self.live_pose_stream_enabled_var.get()),
             "live_preview_enabled": bool(self.live_preview_enabled_var.get()),
-            "echo_heatmap_imaginary_line_width_px": self._echo_heatmap_imaginary_line_width_px(),
+            "echo_heatmap_imaginary_line_width_cm": self._echo_heatmap_imaginary_line_width_cm(),
             "echo_heatmap_min_visible_overlap": self._echo_heatmap_min_visible_overlap(),
             "echo_heatmap_antenna_opening_angle_deg": self._echo_heatmap_antenna_opening_angle_deg(),
             "records": self._records,
@@ -3851,12 +3855,18 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             self.reverse_point_order_var.set(bool(payload.get("reverse_point_order", False)))
             self.live_pose_stream_enabled_var.set(bool(payload.get("live_pose_stream_enabled", False)))
             self.live_preview_enabled_var.set(bool(payload.get("live_preview_enabled", False)))
-            echo_heatmap_imaginary_line_width_px = _parse_positive_float(
-                payload.get("echo_heatmap_imaginary_line_width_px"),
-                default=MULTI_SELECTION_ECHO_DOT_IMAGINARY_LINE_WIDTH_PX,
+            echo_heatmap_imaginary_line_width_cm = _parse_positive_float(
+                payload.get("echo_heatmap_imaginary_line_width_cm"),
+                default=0.0,
             )
+            if echo_heatmap_imaginary_line_width_cm <= 0.0:
+                legacy_px = _parse_positive_float(
+                    payload.get("echo_heatmap_imaginary_line_width_px"),
+                    default=MULTI_SELECTION_ECHO_DOT_IMAGINARY_LINE_WIDTH_PX,
+                )
+                echo_heatmap_imaginary_line_width_cm = legacy_px * 100.0
             self.echo_heatmap_imaginary_line_width_var.set(
-                f"{echo_heatmap_imaginary_line_width_px:g}"
+                f"{echo_heatmap_imaginary_line_width_cm:g}"
             )
             self.echo_heatmap_min_visible_overlap_var.set(
                 str(
