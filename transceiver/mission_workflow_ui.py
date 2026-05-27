@@ -74,6 +74,7 @@ MULTI_SELECTION_ECHO_DOT_COLOR = "#00796B"
 MULTI_SELECTION_ECHO_DOT_OVERLAP_COLOR = "#F4511E"
 MULTI_SELECTION_ECHO_DOT_SAMPLE_LEVELS = (96, 160, 240)
 MULTI_SELECTION_ECHO_DOT_MIN_VISIBLE_OVERLAP = 5
+MULTI_SELECTION_ECHO_DOT_ANTENNA_OPENING_ANGLE_DEG = 360.0
 MULTI_SELECTION_PROBABILITY_DEBUG_LOG = True
 RESULTS_TABLE_EMPTY_ROW_IID = "__results_table_empty_row__"
 
@@ -395,6 +396,9 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self.echo_heatmap_min_visible_overlap_var = tk.StringVar(
             value=str(MULTI_SELECTION_ECHO_DOT_MIN_VISIBLE_OVERLAP)
         )
+        self.echo_heatmap_antenna_opening_angle_deg_var = tk.StringVar(
+            value=f"{MULTI_SELECTION_ECHO_DOT_ANTENNA_OPENING_ANGLE_DEG:g}"
+        )
         self._echo_heatmap_settings_trace_pending = False
         self._live_pose_stream_active = False
 
@@ -452,6 +456,19 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._static_map_layer_signature = None
         self._draw_map_preview()
 
+    def _echo_heatmap_antenna_opening_angle_deg(self) -> float:
+        variable = getattr(self, "echo_heatmap_antenna_opening_angle_deg_var", None)
+        value = (
+            variable.get()
+            if variable is not None
+            else MULTI_SELECTION_ECHO_DOT_ANTENNA_OPENING_ANGLE_DEG
+        )
+        angle = _parse_positive_float(
+            value,
+            default=MULTI_SELECTION_ECHO_DOT_ANTENNA_OPENING_ANGLE_DEG,
+        )
+        return min(360.0, angle)
+
     def _build_echo_heatmap_settings_overlay(self) -> tk.Frame:
         frame = tk.Frame(
             self.map_preview_canvas,
@@ -493,6 +510,17 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             validatecommand=(self.register(self._validate_positive_integer_input), "%P"),
             **entry_kwargs,
         ).grid(row=2, column=1, sticky="w", padx=(2, 8), pady=(2, 6))
+        tk.Label(frame, text="Öffnungswinkel °", **label_kwargs).grid(
+            row=3, column=0, sticky="w", padx=8, pady=(2, 6)
+        )
+        tk.Entry(
+            frame,
+            textvariable=self.echo_heatmap_antenna_opening_angle_deg_var,
+            width=7,
+            validate="key",
+            validatecommand=(self.register(self._validate_positive_float_input), "%P"),
+            **entry_kwargs,
+        ).grid(row=3, column=1, sticky="w", padx=(2, 8), pady=(2, 6))
         return frame
 
     def _sync_echo_heatmap_settings_overlay(self, *, visible: bool) -> None:
@@ -642,6 +670,9 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             "write", lambda *_args: self._on_echo_heatmap_settings_changed()
         )
         self.echo_heatmap_min_visible_overlap_var.trace_add(
+            "write", lambda *_args: self._on_echo_heatmap_settings_changed()
+        )
+        self.echo_heatmap_antenna_opening_angle_deg_var.trace_add(
             "write", lambda *_args: self._on_echo_heatmap_settings_changed()
         )
         self._map_image_original: tk.PhotoImage | None = None
@@ -2542,10 +2573,16 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             imaginary_line_width_px = 0.5
         candidate_count = 0
         sampled_point_count = 0
+        opening_angle_deg = self._echo_heatmap_antenna_opening_angle_deg()
+        opening_half_angle_rad = math.radians(opening_angle_deg / 2.0)
         for record in records:
             measurement_position = self._selected_record_measurement_position(record)
             if measurement_position is None:
                 continue
+            overlay_point = self._selected_record_overlay_point(
+                record,
+                measurement_position=measurement_position,
+            )
             measurement = record.get("measurement")
             if not isinstance(measurement, dict):
                 continue
@@ -2569,6 +2606,17 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             for px, py in point_pairs:
                 if not math.isfinite(px) or not math.isfinite(py):
                     continue
+                if overlay_point is not None:
+                    world_point = self._preview_pixel_to_world(preview_x=px, preview_y=py)
+                    if world_point is None:
+                        continue
+                    if not self._is_world_point_inside_antenna_opening(
+                        origin=(overlay_point.x, overlay_point.y),
+                        yaw=overlay_point.yaw,
+                        target=world_point,
+                        half_angle_rad=opening_half_angle_rad,
+                    ):
+                        continue
                 cell = (
                     int(round(px / imaginary_line_width_px)),
                     int(round(py / imaginary_line_width_px)),
@@ -2795,6 +2843,30 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 continue
             distances.append(numeric)
         return distances
+
+    @staticmethod
+    def _is_world_point_inside_antenna_opening(
+        *,
+        origin: tuple[float, float],
+        yaw: float,
+        target: tuple[float, float],
+        half_angle_rad: float,
+    ) -> bool:
+        if not math.isfinite(half_angle_rad):
+            return True
+        if half_angle_rad >= math.pi:
+            return True
+        ox, oy = origin
+        tx, ty = target
+        vector_x = tx - ox
+        vector_y = ty - oy
+        if not math.isfinite(vector_x) or not math.isfinite(vector_y):
+            return False
+        if abs(vector_x) < 1e-12 and abs(vector_y) < 1e-12:
+            return True
+        point_angle = math.atan2(vector_y, vector_x)
+        delta = math.atan2(math.sin(point_angle - yaw), math.cos(point_angle - yaw))
+        return abs(delta) <= half_angle_rad
 
     def _build_echo_overlay_preview_points(
         self,
@@ -3691,6 +3763,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             "live_preview_enabled": bool(self.live_preview_enabled_var.get()),
             "echo_heatmap_imaginary_line_width_px": self._echo_heatmap_imaginary_line_width_px(),
             "echo_heatmap_min_visible_overlap": self._echo_heatmap_min_visible_overlap(),
+            "echo_heatmap_antenna_opening_angle_deg": self._echo_heatmap_antenna_opening_angle_deg(),
             "records": self._records,
         }
 
@@ -3792,6 +3865,13 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                         default=MULTI_SELECTION_ECHO_DOT_MIN_VISIBLE_OVERLAP,
                     )
                 )
+            )
+            echo_heatmap_antenna_opening_angle_deg = _parse_positive_float(
+                payload.get("echo_heatmap_antenna_opening_angle_deg"),
+                default=MULTI_SELECTION_ECHO_DOT_ANTENNA_OPENING_ANGLE_DEG,
+            )
+            self.echo_heatmap_antenna_opening_angle_deg_var.set(
+                f"{min(360.0, echo_heatmap_antenna_opening_angle_deg):g}"
             )
             self._refresh_points_table()
             self._refresh_map_section()
