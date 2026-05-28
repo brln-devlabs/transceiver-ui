@@ -34,6 +34,7 @@ def _install_pyqtgraph_stub() -> None:
     pg_mod.Qt = qt_mod
     pg_mod.exporters = types.ModuleType("pyqtgraph.exporters")
     pg_mod.ScatterPlotItem = type("ScatterPlotItem", (), {})
+    pg_mod.ViewBox = type("ViewBox", (), {})
     pg_mod.PlotWidget = type("PlotWidget", (), {})
     pg_mod.InfiniteLine = type("InfiniteLine", (), {})
 
@@ -264,6 +265,14 @@ class _DummyEntryWidget:
 
     def get(self) -> str:
         return self._text
+
+
+def test_power_delay_profile_squares_cir_magnitude() -> None:
+    from transceiver.__main__ import _power_delay_profile_from_cir_magnitude
+
+    pdp = _power_delay_profile_from_cir_magnitude(np.array([0.0, 2.0, 3.5], dtype=float))
+
+    np.testing.assert_allclose(pdp, np.array([0.0, 4.0, 12.25], dtype=float))
 
 
 def test_rx_interpolation_factor_prefers_continuous_value_on_continuous_tab() -> None:
