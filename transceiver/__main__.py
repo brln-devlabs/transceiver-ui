@@ -164,11 +164,6 @@ def _repetition_period_samples_from_tx(tx_length_samples: int, lag_step: int = 1
     return max(1, int(tx_length_samples) * max(1, int(lag_step)))
 
 
-def _power_delay_profile_from_cir_magnitude(magnitude: np.ndarray) -> np.ndarray:
-    """Return the power delay profile for magnitude-domain CIR samples."""
-    return np.square(np.abs(np.asarray(magnitude, dtype=float)))
-
-
 def _classify_visible_xcorr_peaks(
     mag: np.ndarray,
     *,
@@ -1901,8 +1896,8 @@ class MissionMeasurementReviewDialog(QtWidgets.QDialog):
 
         layout = QtWidgets.QVBoxLayout(self)
         header = QtWidgets.QLabel(
-            f"Power-Delay-Profile Review für {point_label}\n"
-            "Bitte LOS/Echo-Peaks im Power Delay Profile prüfen und Messung explizit bestätigen."
+            f"Crosscorrelation Review für {point_label}\n"
+            "Bitte LOS/Echo-Peaks prüfen und Messung explizit bestätigen."
         )
         layout.addWidget(header)
 
@@ -1913,9 +1908,9 @@ class MissionMeasurementReviewDialog(QtWidgets.QDialog):
         self._plot = plot_widget.getPlotItem()
         _style_pg_preview_axes(self._plot, PLOT_COLORS["text"])
         self._plot.showGrid(x=True, y=True, alpha=0.2)
-        self._plot.setTitle("Power Delay Profile mit Peak-Labels")
+        self._plot.setTitle("Crosscorr. mit Peak-Labels")
         self._plot.setLabel("bottom", "Lag")
-        self._plot.setLabel("left", "Power")
+        self._plot.setLabel("left", "Magnitude")
         layout.addWidget(plot_widget, stretch=1)
 
         self._stats_label = QtWidgets.QLabel("LOS-Echos: --")
@@ -7646,22 +7641,8 @@ class TransceiverUI(ctk.CTk):
                 )
                 lags = np.asarray(ctx.get("lags", np.array([], dtype=float)))
                 mag = np.asarray(ctx.get("mag", np.array([], dtype=float)))
-                power_delay_profile = _power_delay_profile_from_cir_magnitude(mag)
-                period_samples = int(ctx.get("period_samples")) if ctx.get("period_samples") is not None else None
-                _review_highest_idx, detected_review_los_idx, detected_review_echo_indices = _classify_visible_xcorr_peaks(
-                    power_delay_profile,
-                    repetition_period_samples=max(1, int(period_samples or len(lags) or 1)),
-                )
-                los_idx = detected_review_los_idx if detected_review_los_idx is not None else ctx.get("los_idx")
-                if detected_review_los_idx is not None:
-                    echo_indices = _filter_peak_indices_to_period_group(
-                        lags,
-                        [int(idx) for idx in detected_review_echo_indices if idx is not None],
-                        int(detected_review_los_idx),
-                        period_samples,
-                    )
-                else:
-                    echo_indices = [int(idx) for idx in list(ctx.get("echo_indices", []))]
+                los_idx = ctx.get("los_idx")
+                echo_indices = [int(idx) for idx in list(ctx.get("echo_indices", []))]
                 if isinstance(initial_review, dict) and lags.size:
                     prefill_los_lag = initial_review.get("los_lag")
                     if isinstance(prefill_los_lag, (int, float)):
@@ -7676,8 +7657,8 @@ class TransceiverUI(ctk.CTk):
                                 )
                         if prefilled_echo_indices:
                             echo_indices = prefilled_echo_indices
-                if lags.size == 0 or power_delay_profile.size == 0 or los_idx is None:
-                    detail = "Power Delay Profile enthält keine auswertbaren Peaks (LOS fehlt)."
+                if lags.size == 0 or mag.size == 0 or los_idx is None:
+                    detail = "Crosscorrelation enthält keine auswertbaren Peaks (LOS fehlt)."
                     messagebox.showerror("Mission Review", detail)
                     outcome["approved"] = False
                     outcome["reason"] = REVIEW_REASON_NO_DETECTABLE_LOS
@@ -7685,8 +7666,8 @@ class TransceiverUI(ctk.CTk):
                     return
                 if auto_approve:
                     _highest_idx, detected_los_idx, detected_echo_indices = _classify_visible_xcorr_peaks(
-                        power_delay_profile,
-                        repetition_period_samples=max(1, int(period_samples or len(lags) or 1)),
+                        mag,
+                        repetition_period_samples=max(1, int(ctx.get("period_samples") or len(lags) or 1)),
                     )
                     if detected_los_idx is None:
                         detail = "Auto Detect konnte keinen LOS-Peak bestimmen."
@@ -7694,6 +7675,7 @@ class TransceiverUI(ctk.CTk):
                         outcome["reason"] = REVIEW_REASON_NO_DETECTABLE_LOS
                         outcome["detail"] = detail
                         return
+                    period_samples = int(ctx.get("period_samples")) if ctx.get("period_samples") is not None else None
                     filtered_echo_indices = _filter_peak_indices_to_period_group(
                         lags,
                         [int(idx) for idx in detected_echo_indices if idx is not None],
@@ -7730,7 +7712,7 @@ class TransceiverUI(ctk.CTk):
                     parent=parent_window,
                     point_label=point_label,
                     lags=lags,
-                    magnitudes=power_delay_profile,
+                    magnitudes=mag,
                     los_idx=int(los_idx),
                     echo_indices=echo_indices,
                     interpolation_factor=self._rx_effective_interpolation_factor()
