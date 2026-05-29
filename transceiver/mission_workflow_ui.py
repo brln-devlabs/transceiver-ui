@@ -52,6 +52,7 @@ LIVE_PREVIEW_TARGET_FPS = 25
 LIVE_PREVIEW_FALLBACK_REDRAW_AFTER_S = 1.0
 AUTO_STOP_CONTINUOUS_BEFORE_RUN = True
 ECHO_OVERLAY_COLORS = ("#00796B", "#FFB300", "#8E24AA", "#00ACC1", "#F4511E")
+ECHO_OVERLAY_LINE_WIDTH_PX = 1
 ECHO_HEADING_MARKERS = ("🟢", "🟠", "🟣", "🔵", "🟤")
 LIDAR_OVERLAY_MAX_DRAWN_BEAMS = 450
 LIDAR_OVERLAY_CELL_SIZE_PX = 3.0
@@ -2997,8 +2998,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         )
         if len(preview_points) < 6:
             return (None, 1)
-        line_width = max(1, int(round((echo_distance_m / resolution) * preview_scale_factor * 0.03)))
-        return (preview_points, line_width)
+        return (preview_points, ECHO_OVERLAY_LINE_WIDTH_PX)
 
     def _draw_echo_ellipse_for_overlay(
         self,
