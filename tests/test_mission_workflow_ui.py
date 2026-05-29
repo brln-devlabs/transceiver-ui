@@ -253,6 +253,8 @@ def test_draw_selected_echo_overlay_renders_all_selected_results() -> None:
         },
     ]
     window._rx_antenna_global_position = (1.0, 1.0)
+    window.echo_heatmap_evaluation_visible_var = SimpleNamespace(get=lambda: False)
+    window.echo_heatmap_ellipses_visible_var = SimpleNamespace(get=lambda: True)
     window._mission_points = [
         MeasurementPoint(id="p0", name="P0", x=50.0, y=50.0, yaw=0.0),
         MeasurementPoint(id="p1", name="P1", x=60.0, y=60.0, yaw=0.0),
@@ -265,6 +267,33 @@ def test_draw_selected_echo_overlay_renders_all_selected_results() -> None:
     assert len(calls) == 2
     assert {call["measurement_position"] for call in calls} == {(7.0, -2.0), (8.0, -1.0)}
 
+
+
+def test_draw_selected_echo_overlay_hides_multi_selection_ellipses_by_default() -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    window._selected_result_index = 0
+    window._selected_result_indices = (0, 1)
+    window._records = [
+        {
+            "live_position_at_measurement": {"x": 7.0, "y": -2.0},
+            "measurement": {"result": {"echo_delays": [{"distance_m": 3.0}]}},
+        },
+        {
+            "live_position_at_measurement": {"x": 8.0, "y": -1.0},
+            "measurement": {"result": {"echo_delays": [{"distance_m": 4.0}]}},
+        },
+    ]
+    window._rx_antenna_global_position = (1.0, 1.0)
+    probability_calls: list[dict[str, object]] = []
+    ellipse_calls: list[dict[str, object]] = []
+    window._draw_selected_echo_probability_overlay = lambda **kwargs: probability_calls.append(kwargs) or True
+    window._draw_echo_ellipse_for_overlay = lambda **kwargs: ellipse_calls.append(kwargs)
+
+    overlay_visible = window._draw_selected_echo_overlay()
+
+    assert overlay_visible is True
+    assert len(probability_calls) == 1
+    assert ellipse_calls == []
 
 def test_draw_selected_echo_probability_overlay_draws_dot_cloud_without_grid_rectangles() -> None:
     class FakeCanvas:
@@ -451,12 +480,16 @@ def test_workflow_state_payload_persists_echo_heatmap_settings() -> None:
     window.live_preview_enabled_var = SimpleNamespace(get=lambda: False)
     window.echo_heatmap_imaginary_line_width_var = SimpleNamespace(get=lambda: "6.5")
     window.echo_heatmap_min_visible_overlap_var = SimpleNamespace(get=lambda: "7")
+    window.echo_heatmap_evaluation_visible_var = SimpleNamespace(get=lambda: False)
+    window.echo_heatmap_ellipses_visible_var = SimpleNamespace(get=lambda: True)
     window._records = []
 
     payload = window._build_workflow_state_payload()
 
     assert payload["echo_heatmap_imaginary_line_width_cm"] == 6.5
     assert payload["echo_heatmap_min_visible_overlap"] == 7
+    assert payload["echo_heatmap_evaluation_visible"] is False
+    assert payload["echo_heatmap_ellipses_visible"] is True
 
 
 def test_selected_record_overlay_point_prefers_live_yaw() -> None:
