@@ -1284,6 +1284,84 @@ def test_build_waypoint_arrow_polygon_points_up_for_ninety_degree_yaw() -> None:
     assert round(right_y, 3) == 54.0
 
 
+
+def test_build_echo_overlay_preview_points_clips_to_antenna_opening() -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    window._mission = SimpleNamespace(
+        map_config=SimpleNamespace(resolution=1.0, origin=(0.0, 0.0, 0.0))
+    )
+    window._map_image_original = SimpleNamespace(height=lambda: 100, width=lambda: 100)
+    window._map_preview_scale = (1.0, 1.0)
+    window._map_preview_offset = (0.0, 0.0)
+    window._ellipse_unit_circle_cache = {}
+
+    full_points, _line_width = window._build_echo_overlay_preview_points(
+        rx_position=(-1.0, 0.0),
+        measurement_position=(1.0, 0.0),
+        echo_distance_m=2.0,
+        sample_levels=(72, 72, 72),
+    )
+    clipped_points, _line_width = window._build_echo_overlay_preview_points(
+        rx_position=(-1.0, 0.0),
+        measurement_position=(1.0, 0.0),
+        echo_distance_m=2.0,
+        sample_levels=(72, 72, 72),
+        antenna_origin=(1.0, 0.0),
+        antenna_yaw=math.pi,
+        antenna_half_angle_rad=math.radians(35.0),
+    )
+
+    assert full_points is not None
+    assert clipped_points is not None
+    assert any(not math.isfinite(value) for value in clipped_points)
+    finite_pairs = [
+        (px, py)
+        for px, py in zip(clipped_points[0::2], clipped_points[1::2])
+        if math.isfinite(px) and math.isfinite(py)
+    ]
+    assert finite_pairs
+    assert len(finite_pairs) < (len(full_points) // 2)
+    for preview_x, preview_y in finite_pairs:
+        world_point = (preview_x, 100.0 - preview_y)
+        assert window._is_world_point_inside_antenna_opening(
+            origin=(1.0, 0.0),
+            yaw=math.pi,
+            target=world_point,
+            half_angle_rad=math.radians(35.0),
+        )
+
+
+def test_draw_echo_ellipse_for_overlay_splits_clipped_segments() -> None:
+    class FakeCanvas:
+        def __init__(self) -> None:
+            self.lines: list[tuple[tuple[float, ...], dict[str, object]]] = []
+
+        def create_line(self, *coords: float, **kwargs: object) -> int:
+            self.lines.append((coords, kwargs))
+            return len(self.lines)
+
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    window.map_preview_canvas = FakeCanvas()
+    window._build_echo_overlay_preview_points = lambda **_kwargs: (
+        [1.0, 1.0, 2.0, 2.0, math.nan, math.nan, 3.0, 3.0, 4.0, 4.0],
+        2,
+    )
+
+    item_id = window._draw_echo_ellipse_for_overlay(
+        rx_position=(0.0, 0.0),
+        measurement_position=(1.0, 0.0),
+        echo_distance_m=1.0,
+        color="#ff0000",
+        antenna_origin=(1.0, 0.0),
+        antenna_yaw=0.0,
+        antenna_half_angle_rad=math.radians(45.0),
+    )
+
+    assert item_id == 1
+    assert len(window.map_preview_canvas.lines) == 2
+    assert window.map_preview_canvas.lines[0][0] == (1.0, 1.0, 2.0, 2.0)
+    assert window.map_preview_canvas.lines[1][0] == (3.0, 3.0, 4.0, 4.0)
+
 def test_compute_bistatic_echo_ellipse_axes_uses_sum_path_geometry() -> None:
     axes = _compute_bistatic_echo_ellipse_axes(distance_rx_to_point=10.0, echo_distance_m=6.0)
 
