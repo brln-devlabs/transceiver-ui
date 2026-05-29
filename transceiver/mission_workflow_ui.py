@@ -2594,6 +2594,13 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 echo_distances = self._extract_echo_distances(result.get("echo_delays"), limit=len(ECHO_OVERLAY_COLORS))
                 if not echo_distances:
                     continue
+                overlay_point = self._selected_record_overlay_point(
+                    record,
+                    measurement_position=measurement_position,
+                )
+                opening_half_angle_rad = math.radians(
+                    self._echo_heatmap_antenna_opening_angle_deg() / 2.0
+                )
                 for echo_index, echo_distance in enumerate(echo_distances):
                     color = ECHO_OVERLAY_COLORS[echo_index % len(ECHO_OVERLAY_COLORS)]
                     self._draw_echo_ellipse_for_overlay(
@@ -2601,6 +2608,9 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                         measurement_position=measurement_position,
                         echo_distance_m=echo_distance,
                         color=color,
+                        antenna_origin=(overlay_point.x, overlay_point.y) if overlay_point is not None else None,
+                        antenna_yaw=overlay_point.yaw if overlay_point is not None else None,
+                        antenna_half_angle_rad=opening_half_angle_rad,
                     )
         if multiple_records_selected and self._echo_heatmap_evaluation_visible():
             self._draw_selected_echo_probability_overlay(
@@ -2934,6 +2944,9 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         measurement_position: tuple[float, float],
         echo_distance_m: float,
         sample_levels: tuple[int, int, int] = LIVE_ECHO_SAMPLING_NORMAL,
+        antenna_origin: tuple[float, float] | None = None,
+        antenna_yaw: float | None = None,
+        antenna_half_angle_rad: float | None = None,
     ) -> tuple[list[float] | None, int]:
         mission = self._mission
         original = self._map_image_original
@@ -2984,21 +2997,36 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         cos_angle = math.cos(angle)
         sin_angle = math.sin(angle)
         preview_points: list[float] = []
+        filter_by_opening = (
+            antenna_origin is not None
+            and isinstance(antenna_yaw, (int, float))
+            and isinstance(antenna_half_angle_rad, (int, float))
+        )
         for unit_cos, unit_sin in unit_circle_points:
             local_x = semi_major_axis * unit_cos
             local_y = semi_minor_axis * unit_sin
             world_x = center_x + local_x * cos_angle - local_y * sin_angle
             world_y = center_y + local_x * sin_angle + local_y * cos_angle
+            if filter_by_opening and not self._is_world_point_inside_antenna_opening(
+                origin=antenna_origin,
+                yaw=float(antenna_yaw),
+                target=(world_x, world_y),
+                half_angle_rad=float(antenna_half_angle_rad),
+            ):
+                preview_points.extend((math.nan, math.nan))
+                continue
             map_pixel = self._world_to_map_pixel(x=world_x, y=world_y, image_height=image_height)
             if map_pixel is None:
+                if filter_by_opening:
+                    preview_points.extend((math.nan, math.nan))
                 continue
             preview_points.extend(
                 (
                     map_pixel[0] * scale_x + offset_x,
                     map_pixel[1] * scale_y + offset_y,
                 )
-        )
-        if len(preview_points) < 6:
+            )
+        if sum(1 for value in preview_points if math.isfinite(value)) < 6:
             return (None, 1)
         return (preview_points, ECHO_OVERLAY_LINE_WIDTH_PX)
 
@@ -3009,23 +3037,52 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         measurement_position: tuple[float, float],
         echo_distance_m: float,
         color: str,
+        antenna_origin: tuple[float, float] | None = None,
+        antenna_yaw: float | None = None,
+        antenna_half_angle_rad: float | None = None,
     ) -> int | None:
         preview_points, line_width = self._build_echo_overlay_preview_points(
             rx_position=rx_position,
             measurement_position=measurement_position,
             echo_distance_m=echo_distance_m,
+            antenna_origin=antenna_origin,
+            antenna_yaw=antenna_yaw,
+            antenna_half_angle_rad=antenna_half_angle_rad,
         )
         if preview_points is None:
             return None
-        return int(
-            self.map_preview_canvas.create_line(
-                *preview_points,
-                fill=color,
-                width=line_width,
-                smooth=True,
-                dash=(4, 4),
+        created_item_id: int | None = None
+        segment: list[float] = []
+        for px, py in zip(preview_points[0::2], preview_points[1::2]):
+            if math.isfinite(px) and math.isfinite(py):
+                segment.extend((px, py))
+                continue
+            if len(segment) >= 4:
+                item_id = int(
+                    self.map_preview_canvas.create_line(
+                        *segment,
+                        fill=color,
+                        width=line_width,
+                        smooth=True,
+                        dash=(4, 4),
+                    )
+                )
+                if created_item_id is None:
+                    created_item_id = item_id
+            segment = []
+        if len(segment) >= 4:
+            item_id = int(
+                self.map_preview_canvas.create_line(
+                    *segment,
+                    fill=color,
+                    width=line_width,
+                    smooth=True,
+                    dash=(4, 4),
+                )
             )
-        )
+            if created_item_id is None:
+                created_item_id = item_id
+        return created_item_id
 
     def _ellipse_unit_circle_points(self, *, samples: int) -> tuple[tuple[float, float], ...]:
         if samples < 3:
