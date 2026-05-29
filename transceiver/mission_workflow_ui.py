@@ -1874,12 +1874,20 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._draw_measurement_overlay()
         echo_heatmap_active = self._draw_selected_echo_overlay()
         self._draw_selected_lidar_reference_overlay()
+        self._raise_selected_echo_probability_overlay()
         self._sync_echo_heatmap_settings_overlay(visible=echo_heatmap_active)
 
     def _draw_live_overlay_layer(self) -> None:
         self._draw_live_echo_preview_overlay()
         self._draw_live_marker()
         self._draw_live_position_info_overlay()
+        self._raise_selected_echo_probability_overlay()
+
+    def _raise_selected_echo_probability_overlay(self) -> None:
+        try:
+            self.map_preview_canvas.tag_raise("selected_echo_probability_dot")
+        except tk.TclError:
+            pass
 
     def _clear_live_overlay_layer(
         self,
@@ -2891,6 +2899,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 center_y + radius,
                 fill=color,
                 outline="",
+                tags=("selected_echo_probability_dot",),
             )
             drawn_points += 1
         if MULTI_SELECTION_PROBABILITY_DEBUG_LOG:
