@@ -5,7 +5,7 @@ import time
 import zipfile
 import subprocess
 import shlex
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 import math
 import re
@@ -61,6 +61,12 @@ LIDAR_OVERLAY_SMALL_MAP_REFERENCE_SIZE_PX = 600.0
 LIDAR_OVERLAY_SMALL_MAP_MIN_CELL_FACTOR = 0.35
 LIDAR_OVERLAY_MIN_CELL_SIZE_PX = 1.0
 LIDAR_OVERLAY_SCANNER_YAW_OFFSET_RAD = math.pi / 2.0
+LIDAR_WALL_MIN_POINTS = 8
+LIDAR_WALL_BIN_SIZE_M = 0.05
+LIDAR_WALL_INLIER_THRESHOLD_M = 0.08
+LIDAR_WALL_MAX_ABS_SLOPE = math.tan(math.radians(12.0))
+LIDAR_WALL_LINE_COLOR = "#1E88E5"
+LIDAR_WALL_LINE_WIDTH_PX = 3
 MEASUREMENT_START_LIVE_POSITION_WAIT_TIMEOUT_S = 1.6
 MEASUREMENT_START_LIVE_POSITION_WAIT_INTERVAL_S = 0.1
 LIVE_ECHO_CACHE_POSITION_DELTA_M = 0.015
@@ -156,6 +162,151 @@ def _operator_error_code(event_type: str, detail: str) -> str:
     if event_type == "aborted":
         return "navigation_failed.aborted"
     return f"navigation_failed.{event_type}"
+
+
+@dataclass(frozen=True)
+class LidarWallEstimate:
+    """Robust estimate for the lower horizontal LiDAR wall in map/world coordinates."""
+
+    slope: float
+    intercept: float
+    start: tuple[float, float]
+    end: tuple[float, float]
+    point_count: int
+    residual_mean_m: float
+    residual_std_m: float
+    residual_rms_m: float
+
+
+def _fit_lidar_wall_line(points: list[tuple[float, float]]) -> tuple[float, float] | None:
+    if len(points) < 2:
+        return None
+    x_values = np.asarray([point[0] for point in points], dtype=float)
+    y_values = np.asarray([point[1] for point in points], dtype=float)
+    if not np.all(np.isfinite(x_values)) or not np.all(np.isfinite(y_values)):
+        return None
+    x_span = float(np.max(x_values) - np.min(x_values))
+    if x_span < 1e-9:
+        return None
+    slope, intercept = np.polyfit(x_values, y_values, deg=1)
+    if not math.isfinite(float(slope)) or not math.isfinite(float(intercept)):
+        return None
+    return (float(slope), float(intercept))
+
+
+def _lidar_line_residuals(
+    points: list[tuple[float, float]],
+    *,
+    slope: float,
+    intercept: float,
+) -> np.ndarray:
+    x_values = np.asarray([point[0] for point in points], dtype=float)
+    y_values = np.asarray([point[1] for point in points], dtype=float)
+    denominator = math.sqrt(slope * slope + 1.0)
+    if denominator <= 0.0 or not math.isfinite(denominator):
+        return np.asarray([], dtype=float)
+    return (slope * x_values - y_values + intercept) / denominator
+
+
+def _estimate_lower_horizontal_lidar_wall(
+    points: list[tuple[float, float]],
+    *,
+    min_points: int = LIDAR_WALL_MIN_POINTS,
+    bin_size_m: float = LIDAR_WALL_BIN_SIZE_M,
+    inlier_threshold_m: float = LIDAR_WALL_INLIER_THRESHOLD_M,
+    max_abs_slope: float = LIDAR_WALL_MAX_ABS_SLOPE,
+) -> LidarWallEstimate | None:
+    """Estimate the lower map wall from LiDAR hit points and ignore other structures.
+
+    The map coordinate system used by ROS occupancy grids has increasing world ``y``
+    upwards.  The lower wall in the map preview therefore has a small world ``y``
+    value.  We first keep only that lower half, choose the densest horizontal
+    ``y`` band, and then refine a line with two residual-based rejections.
+    """
+
+    finite_points = [
+        (float(x), float(y))
+        for x, y in points
+        if math.isfinite(float(x)) and math.isfinite(float(y))
+    ]
+    if len(finite_points) < min_points:
+        return None
+
+    y_values = np.asarray([point[1] for point in finite_points], dtype=float)
+    lower_cutoff = float(np.median(y_values))
+    lower_points = [point for point in finite_points if point[1] <= lower_cutoff]
+    if len(lower_points) < min_points:
+        lower_points = finite_points
+
+    safe_bin_size = bin_size_m if math.isfinite(bin_size_m) and bin_size_m > 0.0 else LIDAR_WALL_BIN_SIZE_M
+    band_buckets: dict[int, list[tuple[float, float]]] = {}
+    for point in lower_points:
+        band_buckets.setdefault(int(math.floor(point[1] / safe_bin_size)), []).append(point)
+    if not band_buckets:
+        return None
+    densest_band_index, _densest_band_points = max(
+        band_buckets.items(),
+        key=lambda item: (len(item[1]), -abs(item[0])),
+    )
+    adjacent_band_points = [
+        point
+        for band_index in (densest_band_index - 1, densest_band_index, densest_band_index + 1)
+        for point in band_buckets.get(band_index, [])
+    ]
+    if len(adjacent_band_points) < min_points:
+        return None
+
+    candidate_points = adjacent_band_points
+    fit = _fit_lidar_wall_line(candidate_points)
+    if fit is None:
+        return None
+    slope, intercept = fit
+    if abs(slope) > max_abs_slope:
+        slope = 0.0
+        intercept = float(np.median([point[1] for point in candidate_points]))
+
+    threshold = inlier_threshold_m if math.isfinite(inlier_threshold_m) and inlier_threshold_m > 0.0 else LIDAR_WALL_INLIER_THRESHOLD_M
+    for _ in range(2):
+        residuals = _lidar_line_residuals(candidate_points, slope=slope, intercept=intercept)
+        if residuals.size < min_points:
+            return None
+        inliers = [
+            point
+            for point, residual in zip(candidate_points, residuals)
+            if math.isfinite(float(residual)) and abs(float(residual)) <= threshold
+        ]
+        if len(inliers) < min_points:
+            return None
+        fit = _fit_lidar_wall_line(inliers)
+        if fit is None:
+            return None
+        slope, intercept = fit
+        if abs(slope) > max_abs_slope:
+            slope = 0.0
+            intercept = float(np.median([point[1] for point in inliers]))
+        candidate_points = inliers
+
+    residuals = _lidar_line_residuals(candidate_points, slope=slope, intercept=intercept)
+    if residuals.size < min_points:
+        return None
+    abs_residuals = np.abs(residuals)
+    x_values = [point[0] for point in candidate_points]
+    start_x = min(x_values)
+    end_x = max(x_values)
+    if not math.isfinite(start_x) or not math.isfinite(end_x) or abs(end_x - start_x) < 1e-9:
+        return None
+    start = (float(start_x), float(slope * start_x + intercept))
+    end = (float(end_x), float(slope * end_x + intercept))
+    return LidarWallEstimate(
+        slope=float(slope),
+        intercept=float(intercept),
+        start=start,
+        end=end,
+        point_count=len(candidate_points),
+        residual_mean_m=float(np.mean(abs_residuals)),
+        residual_std_m=float(np.std(residuals)),
+        residual_rms_m=float(math.sqrt(np.mean(residuals * residuals))),
+    )
 
 
 def _compute_bistatic_echo_ellipse_axes(
@@ -3096,6 +3247,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         return points
 
     def _draw_selected_lidar_reference_overlay(self) -> None:
+        wall_points: list[tuple[float, float]] = []
         for record in self._selected_record_payloads():
             measurement_position = self._selected_record_measurement_position(record)
             if measurement_position is None:
@@ -3119,6 +3271,10 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             if overlay_point is None:
                 continue
             self._draw_lidar_scan_overlay_for_point(point=overlay_point, scan=scan)
+            wall_points.extend(self._lidar_scan_world_points_for_point(point=overlay_point, scan=scan))
+        estimate = _estimate_lower_horizontal_lidar_wall(wall_points)
+        if estimate is not None:
+            self._draw_lidar_wall_estimate(estimate)
 
     def _selected_record_payload(self) -> dict[str, Any] | None:
         selected_idx = self._selected_result_index
@@ -3208,6 +3364,79 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         beam_index: int,
     ) -> float:
         return point_yaw + LIDAR_OVERLAY_SCANNER_YAW_OFFSET_RAD + angle_min + beam_index * angle_increment
+
+    def _lidar_scan_world_points_for_point(
+        self,
+        *,
+        point: MeasurementPoint,
+        scan: dict[str, Any],
+    ) -> list[tuple[float, float]]:
+        angle_min = float(scan["angle_min"])
+        angle_increment = float(scan["angle_increment"])
+        ranges = scan["ranges"]
+        opening_half_angle_rad = math.radians(self._echo_heatmap_antenna_opening_angle_deg() / 2.0)
+        filter_by_opening = math.isfinite(opening_half_angle_rad) and opening_half_angle_rad < math.pi
+        world_points: list[tuple[float, float]] = []
+        for idx, distance in enumerate(ranges):
+            if not isinstance(distance, (int, float)) or not math.isfinite(distance) or distance <= 0.0:
+                continue
+            numeric_distance = float(distance)
+            beam_angle = self._lidar_overlay_beam_angle(
+                point_yaw=point.yaw,
+                angle_min=angle_min,
+                angle_increment=angle_increment,
+                beam_index=idx,
+            )
+            end_world_x = point.x + math.cos(beam_angle) * numeric_distance
+            end_world_y = point.y + math.sin(beam_angle) * numeric_distance
+            if filter_by_opening and not self._is_world_point_inside_antenna_opening(
+                origin=(point.x, point.y),
+                yaw=point.yaw,
+                target=(end_world_x, end_world_y),
+                half_angle_rad=opening_half_angle_rad,
+            ):
+                continue
+            world_points.append((end_world_x, end_world_y))
+        return world_points
+
+    def _draw_lidar_wall_estimate(self, estimate: LidarWallEstimate) -> None:
+        original = self._map_image_original
+        if original is None:
+            return
+        start_map_pixel = self._world_to_map_pixel(
+            x=estimate.start[0],
+            y=estimate.start[1],
+            image_height=original.height(),
+        )
+        end_map_pixel = self._world_to_map_pixel(
+            x=estimate.end[0],
+            y=estimate.end[1],
+            image_height=original.height(),
+        )
+        if start_map_pixel is None or end_map_pixel is None:
+            return
+        scale_x, scale_y = getattr(self, "_map_preview_scale", (1.0, 1.0))
+        offset_x, offset_y = self._map_preview_offset
+        start_x = start_map_pixel[0] * scale_x + offset_x
+        start_y = start_map_pixel[1] * scale_y + offset_y
+        end_x = end_map_pixel[0] * scale_x + offset_x
+        end_y = end_map_pixel[1] * scale_y + offset_y
+        self.map_preview_canvas.create_line(
+            start_x,
+            start_y,
+            end_x,
+            end_y,
+            fill=LIDAR_WALL_LINE_COLOR,
+            width=LIDAR_WALL_LINE_WIDTH_PX,
+        )
+        self._append_validation(
+            "ℹ️ LiDAR-Wand: "
+            f"{estimate.point_count} Punkte, "
+            f"y={estimate.slope:.4f}x+{estimate.intercept:.3f}, "
+            f"σ={estimate.residual_std_m * 100.0:.1f}cm, "
+            f"mittl. |Abweichung|={estimate.residual_mean_m * 100.0:.1f}cm, "
+            f"RMS={estimate.residual_rms_m * 100.0:.1f}cm"
+        )
 
     def _draw_lidar_scan_overlay_for_point(self, *, point: MeasurementPoint, scan: dict[str, Any]) -> None:
         original = self._map_image_original

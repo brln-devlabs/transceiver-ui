@@ -11,7 +11,28 @@ from transceiver.mission_workflow_ui import (
     RESULTS_TABLE_EMPTY_ROW_IID,
     MissionWorkflowWindow,
     _compute_bistatic_echo_ellipse_axes,
+    _estimate_lower_horizontal_lidar_wall,
 )
+
+
+def test_estimate_lower_horizontal_lidar_wall_ignores_upper_walls_and_columns() -> None:
+    lower_wall = [(x / 10.0, 1.0 + (0.01 if x % 2 else -0.01)) for x in range(0, 31)]
+    upper_wall = [(x / 10.0, 3.0 + (0.01 if x % 2 else -0.01)) for x in range(0, 31)]
+    column = [(1.2 + (0.01 if y % 2 else -0.01), 1.5 + y / 10.0) for y in range(0, 10)]
+
+    estimate = _estimate_lower_horizontal_lidar_wall(lower_wall + upper_wall + column)
+
+    assert estimate is not None
+    assert estimate.point_count >= len(lower_wall) - 2
+    assert abs(estimate.slope) < 0.02
+    assert estimate.intercept == pytest.approx(1.0, abs=0.03)
+    assert estimate.residual_std_m == pytest.approx(0.01, abs=0.004)
+
+
+def test_estimate_lower_horizontal_lidar_wall_rejects_too_few_points() -> None:
+    estimate = _estimate_lower_horizontal_lidar_wall([(0.0, 1.0), (1.0, 1.0)])
+
+    assert estimate is None
 
 
 def test_format_echo_distances_for_table_returns_only_meter_values_for_first_five_echoes() -> None:
