@@ -2572,39 +2572,34 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             return False
         selected_records = self._selected_record_payloads()
         multiple_records_selected = len(selected_records) > 1
-        if (
-            multiple_records_selected
-            and self._echo_heatmap_evaluation_visible()
-            and self._draw_selected_echo_probability_overlay(
+        ellipses_visible = not multiple_records_selected or self._echo_heatmap_ellipses_visible()
+        if ellipses_visible:
+            for record in selected_records:
+                measurement_position = self._selected_record_measurement_position(record)
+                if measurement_position is None:
+                    continue
+                measurement = record.get("measurement")
+                if not isinstance(measurement, dict):
+                    continue
+                result = measurement.get("result")
+                if not isinstance(result, dict):
+                    continue
+                echo_distances = self._extract_echo_distances(result.get("echo_delays"), limit=len(ECHO_OVERLAY_COLORS))
+                if not echo_distances:
+                    continue
+                for echo_index, echo_distance in enumerate(echo_distances):
+                    color = ECHO_OVERLAY_COLORS[echo_index % len(ECHO_OVERLAY_COLORS)]
+                    self._draw_echo_ellipse_for_overlay(
+                        rx_position=rx_position,
+                        measurement_position=measurement_position,
+                        echo_distance_m=echo_distance,
+                        color=color,
+                    )
+        if multiple_records_selected and self._echo_heatmap_evaluation_visible():
+            self._draw_selected_echo_probability_overlay(
                 rx_position=rx_position,
                 records=selected_records,
             )
-            and not self._echo_heatmap_ellipses_visible()
-        ):
-            return True
-        if multiple_records_selected and not self._echo_heatmap_ellipses_visible():
-            return True
-        for record in selected_records:
-            measurement_position = self._selected_record_measurement_position(record)
-            if measurement_position is None:
-                continue
-            measurement = record.get("measurement")
-            if not isinstance(measurement, dict):
-                continue
-            result = measurement.get("result")
-            if not isinstance(result, dict):
-                continue
-            echo_distances = self._extract_echo_distances(result.get("echo_delays"), limit=len(ECHO_OVERLAY_COLORS))
-            if not echo_distances:
-                continue
-            for echo_index, echo_distance in enumerate(echo_distances):
-                color = ECHO_OVERLAY_COLORS[echo_index % len(ECHO_OVERLAY_COLORS)]
-                self._draw_echo_ellipse_for_overlay(
-                    rx_position=rx_position,
-                    measurement_position=measurement_position,
-                    echo_distance_m=echo_distance,
-                    color=color,
-                )
         return multiple_records_selected
 
     def _draw_selected_echo_probability_overlay(
