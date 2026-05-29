@@ -1180,6 +1180,42 @@ def test_lidar_overlay_beam_angle_compensates_left_rotated_scanner() -> None:
     assert angle == pytest.approx(math.pi / 2.0)
 
 
+def test_draw_lidar_scan_overlay_filters_points_by_tx_opening_angle() -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    window._map_image_original = SimpleNamespace(width=lambda: 200, height=lambda: 120)
+    window._map_preview_scale = (1.0, 1.0)
+    window._map_preview_offset = (0.0, 0.0)
+    window._world_to_map_pixel = lambda *, x, y, image_height: (x, y)
+    window._is_pixel_inside_map = lambda *_args, **_kwargs: True
+    window.echo_heatmap_antenna_opening_angle_deg_var = SimpleNamespace(get=lambda: "90")
+    lidar_point_calls: list[tuple[tuple[float, ...], dict[str, object]]] = []
+    messages: list[str] = []
+
+    def create_oval(*args, **kwargs):
+        if kwargs.get("fill") == "#fff176":
+            lidar_point_calls.append((args, kwargs))
+
+    window.map_preview_canvas = SimpleNamespace(create_oval=create_oval)
+    window._append_validation = messages.append
+
+    window._draw_lidar_scan_overlay_for_point(
+        point=MeasurementPoint(id="p1", name="P1", x=0.0, y=0.0, yaw=0.0),
+        scan={"angle_min": -math.pi / 2.0, "angle_increment": math.pi / 2.0, "ranges": [10.0] * 4},
+    )
+
+    assert len(lidar_point_calls) == 1
+    coords, _kwargs = lidar_point_calls[0]
+    center_x = (coords[0] + coords[2]) / 2.0
+    center_y = (coords[1] + coords[3]) / 2.0
+    assert center_x == pytest.approx(10.0)
+    assert center_y == pytest.approx(0.0)
+    assert messages == [
+        "ℹ️ LiDAR-Overlay: gültige Ranges=1, Öffnungswinkel übersprungen=3, "
+        "Stride übersprungen=0, Zellfilter übersprungen=0, Punkte gezeichnet=1, "
+        "Zellgröße=1.05px, Stride=1"
+    ]
+
+
 def test_draw_lidar_scan_overlay_deduplicates_dense_endpoints() -> None:
     window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
     window._map_image_original = SimpleNamespace(width=lambda: 200, height=lambda: 120)

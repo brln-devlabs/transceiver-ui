@@ -3246,9 +3246,32 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         angle_min = float(scan["angle_min"])
         angle_increment = float(scan["angle_increment"])
         ranges = scan["ranges"]
-        finite_positive_beam_count = sum(
-            1 for distance in ranges if isinstance(distance, (int, float)) and math.isfinite(distance) and distance > 0.0
-        )
+        opening_half_angle_rad = math.radians(self._echo_heatmap_antenna_opening_angle_deg() / 2.0)
+        filter_by_opening = math.isfinite(opening_half_angle_rad) and opening_half_angle_rad < math.pi
+        drawable_beams: list[tuple[int, float, float, float, float]] = []
+        skipped_by_opening_count = 0
+        for idx, distance in enumerate(ranges):
+            if not isinstance(distance, (int, float)) or not math.isfinite(distance) or distance <= 0.0:
+                continue
+            numeric_distance = float(distance)
+            beam_angle = self._lidar_overlay_beam_angle(
+                point_yaw=point.yaw,
+                angle_min=angle_min,
+                angle_increment=angle_increment,
+                beam_index=idx,
+            )
+            end_world_x = point.x + math.cos(beam_angle) * numeric_distance
+            end_world_y = point.y + math.sin(beam_angle) * numeric_distance
+            if filter_by_opening and not self._is_world_point_inside_antenna_opening(
+                origin=(point.x, point.y),
+                yaw=point.yaw,
+                target=(end_world_x, end_world_y),
+                half_angle_rad=opening_half_angle_rad,
+            ):
+                skipped_by_opening_count += 1
+                continue
+            drawable_beams.append((idx, numeric_distance, beam_angle, end_world_x, end_world_y))
+        finite_positive_beam_count = len(drawable_beams)
         beam_stride = max(1, finite_positive_beam_count // LIDAR_OVERLAY_MAX_DRAWN_BEAMS)
         density_factor = max(1.0, math.sqrt(finite_positive_beam_count / float(LIDAR_OVERLAY_MAX_DRAWN_BEAMS)))
         preview_width = original.width() * scale_x
@@ -3269,20 +3292,10 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         skipped_by_cell_filter_count = 0
         drawn_beam_count = 0
         drawn_beam_cells: dict[tuple[int, int], int] = {}
-        for idx, distance in enumerate(ranges):
-            if not isinstance(distance, (int, float)) or not math.isfinite(distance) or distance <= 0.0:
-                continue
-            if idx % beam_stride != 0:
+        for candidate_idx, (_beam_index, _distance, _beam_angle, end_world_x, end_world_y) in enumerate(drawable_beams):
+            if candidate_idx % beam_stride != 0:
                 skipped_by_stride_count += 1
                 continue
-            beam_angle = self._lidar_overlay_beam_angle(
-                point_yaw=point.yaw,
-                angle_min=angle_min,
-                angle_increment=angle_increment,
-                beam_index=idx,
-            )
-            end_world_x = point.x + math.cos(beam_angle) * distance
-            end_world_y = point.y + math.sin(beam_angle) * distance
             end_map_pixel = self._world_to_map_pixel(x=end_world_x, y=end_world_y, image_height=original.height())
             if end_map_pixel is None:
                 continue
@@ -3307,9 +3320,13 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 width=1,
             )
             drawn_beam_count += 1
+        opening_filter_summary = (
+            f"Öffnungswinkel übersprungen={skipped_by_opening_count}, " if filter_by_opening else ""
+        )
         self._append_validation(
             "ℹ️ LiDAR-Overlay: "
             f"gültige Ranges={finite_positive_beam_count}, "
+            f"{opening_filter_summary}"
             f"Stride übersprungen={skipped_by_stride_count}, "
             f"Zellfilter übersprungen={skipped_by_cell_filter_count}, "
             f"Punkte gezeichnet={drawn_beam_count}, "
