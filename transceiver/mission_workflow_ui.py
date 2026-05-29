@@ -525,17 +525,6 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             validatecommand=(self.register(self._validate_positive_integer_input), "%P"),
             **entry_kwargs,
         ).grid(row=2, column=1, sticky="w", padx=(2, 8), pady=(2, 6))
-        tk.Label(frame, text="Öffnungswinkel °", **label_kwargs).grid(
-            row=3, column=0, sticky="w", padx=8, pady=(2, 6)
-        )
-        tk.Entry(
-            frame,
-            textvariable=self.echo_heatmap_antenna_opening_angle_deg_var,
-            width=7,
-            validate="key",
-            validatecommand=(self.register(self._validate_positive_float_input), "%P"),
-            **entry_kwargs,
-        ).grid(row=3, column=1, sticky="w", padx=(2, 8), pady=(2, 6))
         checkbutton_kwargs = {
             "bg": "#20242a",
             "fg": "#f5f5f5",
@@ -550,14 +539,14 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             variable=self.echo_heatmap_evaluation_visible_var,
             command=self._on_echo_heatmap_settings_changed,
             **checkbutton_kwargs,
-        ).grid(row=4, column=0, columnspan=2, sticky="ew", padx=8, pady=(2, 0))
+        ).grid(row=3, column=0, columnspan=2, sticky="ew", padx=8, pady=(2, 0))
         tk.Checkbutton(
             frame,
             text="Ellipsen anzeigen",
             variable=self.echo_heatmap_ellipses_visible_var,
             command=self._on_echo_heatmap_settings_changed,
             **checkbutton_kwargs,
-        ).grid(row=5, column=0, columnspan=2, sticky="ew", padx=8, pady=(0, 6))
+        ).grid(row=4, column=0, columnspan=2, sticky="ew", padx=8, pady=(0, 6))
         return frame
 
     def _sync_echo_heatmap_settings_overlay(self, *, visible: bool) -> None:
@@ -802,6 +791,19 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             width=42,
         )
         self.rx_antenna_map_pick_mode_btn.grid(row=0, column=7, padx=(3, 0), sticky="w")
+        ctk.CTkLabel(rx_position_controls, text="TX Öffnungswinkel").grid(
+            row=1, column=0, padx=(0, 4), pady=(6, 0), sticky="w"
+        )
+        ctk.CTkEntry(
+            rx_position_controls,
+            textvariable=self.echo_heatmap_antenna_opening_angle_deg_var,
+            width=95,
+            validate="key",
+            validatecommand=(self.register(self._validate_positive_float_input), "%P"),
+        ).grid(row=1, column=1, columnspan=2, padx=(6, 4), pady=(6, 0), sticky="w")
+        ctk.CTkLabel(rx_position_controls, text="°").grid(
+            row=1, column=3, padx=(0, 6), pady=(6, 0), sticky="w"
+        )
 
         side_panel = ctk.CTkFrame(map_controls_row)
         side_panel.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
