@@ -78,7 +78,7 @@ MULTI_SELECTION_ECHO_DOT_MIN_VISIBLE_OVERLAP = 5
 MULTI_SELECTION_ECHO_DOT_ANTENNA_OPENING_ANGLE_DEG = 360.0
 MULTI_SELECTION_PROBABILITY_DEBUG_LOG = True
 RESULTS_TABLE_EMPTY_ROW_IID = "__results_table_empty_row__"
-
+ECHO_SUMMARY_MAD_THRESHOLD = 3.5
 
 
 def _load_json_dict(path: Path) -> dict[str, Any]:
@@ -1042,9 +1042,14 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         ).grid(row=0, column=0, sticky="ew", padx=(2, 0))
         ctk.CTkButton(
             results_footer,
+            text="Ergebnisse zusammenfassen",
+            command=self._summarize_results_table,
+        ).grid(row=0, column=1, sticky="e", padx=(8, 0))
+        ctk.CTkButton(
+            results_footer,
             text="Ergebnisliste leeren",
             command=self._clear_results_table,
-        ).grid(row=0, column=1, sticky="e", padx=(8, 0))
+        ).grid(row=0, column=2, sticky="e", padx=(8, 0))
 
         self._mission_points: list[MeasurementPoint] = []
         self.mission_name_var.trace_add("write", lambda *_args: self._persist_workflow_state())
@@ -5177,6 +5182,301 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._persist_workflow_state()
         self.destroy()
 
+    def _summarize_results_table(self) -> None:
+        if not self._records:
+            messagebox.showinfo(
+                "Ergebnisse zusammenfassen",
+                "Es sind noch keine Ergebnisse vorhanden.",
+                parent=self,
+            )
+            return
+        grouped_records = self._summarize_records_by_point_index(self._records)
+        if len(grouped_records) == len(self._records):
+            messagebox.showinfo(
+                "Ergebnisse zusammenfassen",
+                "Es gibt keine mehrfach gemessenen Punktindizes zum Zusammenfassen.",
+                parent=self,
+            )
+            return
+        previous_count = len(self._records)
+        if not messagebox.askyesno(
+            "Ergebnisse zusammenfassen",
+            (
+                f"{previous_count} Ergebniszeilen werden zu {len(grouped_records)} Punktindex-Zeilen "
+                "zusammengefasst.\n\n"
+                "Dabei werden Echo-Ausreißer mit der MAD-Methode entfernt und fehlende Echos "
+                "über die Echo-Distanzen spaltenübergreifend ausgerichtet. Fortfahren?"
+            ),
+            parent=self,
+        ):
+            self._append_validation("ℹ️ Ergebnisse zusammenfassen wurde abgebrochen.")
+            return
+
+        self._records = grouped_records
+        self._refresh_results_table()
+        self._persist_workflow_state()
+        self._update_live_label()
+        self._draw_map_preview()
+        self._append_validation(
+            f"✅ Ergebnisliste zusammengefasst: {previous_count} Zeilen → {len(grouped_records)} Punktindex-Zeilen."
+        )
+
+    @classmethod
+    def _summarize_records_by_point_index(cls, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        grouped: dict[Any, list[dict[str, Any]]] = {}
+        order: list[Any] = []
+        for record in records:
+            key = record.get("point_index")
+            if key not in grouped:
+                grouped[key] = []
+                order.append(key)
+            grouped[key].append(record)
+
+        summarized: list[dict[str, Any]] = []
+        for key in order:
+            group = grouped[key]
+            if len(group) <= 1:
+                summarized.append(dict(group[0]))
+                continue
+            summarized.append(cls._summarize_point_index_records(group))
+        return summarized
+
+    @classmethod
+    def _summarize_point_index_records(cls, records: list[dict[str, Any]]) -> dict[str, Any]:
+        base = json.loads(json.dumps(records[0]))
+        echo_summary = cls._summarize_echo_delays_for_records(records)
+        result = cls._ensure_summary_result_payload(base)
+        result["echo_delays"] = echo_summary["echo_delays"]
+        result["summary"] = {
+            "method": "mad_mean_by_point_index",
+            "source_record_count": len(records),
+            "outlier_count": echo_summary["outlier_count"],
+            "echo_columns": echo_summary["echo_columns"],
+        }
+        review = result.get("review")
+        if isinstance(review, dict):
+            review["echo_delays"] = echo_summary["echo_delays"]
+        base["measurement"] = {"status": "succeeded", "result": result}
+        base["navigation"] = cls._summarize_navigation_payload(records)
+        base["error"] = None
+        base["global_index"] = records[0].get("global_index")
+        base["measurements_per_point"] = len(records)
+        base["measurement_index"] = None
+        cls._attach_average_live_position_to_summary(base, records)
+        return base
+
+    @staticmethod
+    def _ensure_summary_result_payload(record: dict[str, Any]) -> dict[str, Any]:
+        measurement = record.get("measurement")
+        result = measurement.get("result") if isinstance(measurement, dict) else None
+        return dict(result) if isinstance(result, dict) else {}
+
+    @staticmethod
+    def _summarize_navigation_payload(records: list[dict[str, Any]]) -> dict[str, Any]:
+        navigation_states = [
+            record.get("navigation", {}).get("state")
+            for record in records
+            if isinstance(record.get("navigation"), dict)
+        ]
+        if navigation_states and all(state == "succeeded" for state in navigation_states):
+            return {"state": "succeeded"}
+        first_navigation = records[0].get("navigation")
+        payload = dict(first_navigation) if isinstance(first_navigation, dict) else {}
+        payload["state"] = payload.get("state") or "summarized"
+        return payload
+
+    @staticmethod
+    def _attach_average_live_position_to_summary(summary: dict[str, Any], records: list[dict[str, Any]]) -> None:
+        positions: list[tuple[float, float]] = []
+        for record in records:
+            position = record.get("live_position_at_measurement")
+            if not isinstance(position, dict):
+                continue
+            x_value = position.get("x")
+            y_value = position.get("y")
+            if not isinstance(x_value, (int, float)) or not isinstance(y_value, (int, float)):
+                continue
+            x = float(x_value)
+            y = float(y_value)
+            if math.isfinite(x) and math.isfinite(y):
+                positions.append((x, y))
+        if not positions:
+            return
+        summary["live_position_at_measurement"] = {
+            "x": sum(x for x, _y in positions) / len(positions),
+            "y": sum(y for _x, y in positions) / len(positions),
+        }
+
+    @classmethod
+    def _summarize_echo_delays_for_records(cls, records: list[dict[str, Any]]) -> dict[str, Any]:
+        rows = [cls._extract_structured_echo_entries(record) for record in records]
+        template = max(rows, key=len, default=[])
+        if not template:
+            return {"echo_delays": [], "outlier_count": 0, "echo_columns": []}
+        column_count = len(template)
+        medians = [entry["distance_m"] for entry in template]
+        typical_gap = cls._typical_echo_gap(medians)
+        assignments = cls._align_echo_rows_to_medians(rows, medians, typical_gap=typical_gap)
+        medians = cls._median_distances_from_assignments(assignments, fallback=medians)
+        typical_gap = cls._typical_echo_gap(medians)
+        assignments = cls._align_echo_rows_to_medians(rows, medians, typical_gap=typical_gap)
+
+        assigned_entry_count = sum(
+            1
+            for row in assignments
+            for entry in row
+            if entry is not None
+        )
+        total_entry_count = sum(len(row) for row in rows)
+        echo_delays: list[dict[str, Any]] = []
+        echo_columns: list[dict[str, Any]] = []
+        outlier_count = max(0, total_entry_count - assigned_entry_count)
+        for column_index in range(column_count):
+            entries = [row[column_index] for row in assignments if row[column_index] is not None]
+            inliers, outliers = cls._mad_inlier_entries(entries)
+            outlier_count += len(outliers)
+            if not inliers:
+                continue
+            distances = [entry["distance_m"] for entry in inliers]
+            summarized_entry: dict[str, Any] = {
+                "echo_index": column_index,
+                "distance_m": round(sum(distances) / len(distances), 3),
+            }
+            delta_lags = [entry.get("delta_lag") for entry in inliers if isinstance(entry.get("delta_lag"), (int, float))]
+            if delta_lags:
+                summarized_entry["delta_lag"] = round(sum(float(value) for value in delta_lags) / len(delta_lags), 3)
+            echo_delays.append(summarized_entry)
+            echo_columns.append(
+                {
+                    "echo_index": column_index,
+                    "source_count": len(entries),
+                    "inlier_count": len(inliers),
+                    "outlier_count": len(outliers),
+                }
+            )
+        return {"echo_delays": echo_delays, "outlier_count": outlier_count, "echo_columns": echo_columns}
+
+    @staticmethod
+    def _extract_structured_echo_entries(record: dict[str, Any]) -> list[dict[str, Any]]:
+        measurement = record.get("measurement")
+        result = measurement.get("result") if isinstance(measurement, dict) else None
+        echo_delays = result.get("echo_delays") if isinstance(result, dict) else None
+        entries: list[dict[str, Any]] = []
+        if not isinstance(echo_delays, list):
+            return entries
+        for fallback_index, raw_entry in enumerate(echo_delays):
+            entry = dict(raw_entry) if isinstance(raw_entry, dict) else {"distance_m": raw_entry}
+            distance_value = entry.get("distance_m")
+            if not isinstance(distance_value, (int, float)):
+                continue
+            distance = float(distance_value)
+            if not math.isfinite(distance):
+                continue
+            entry["distance_m"] = distance
+            if "echo_index" not in entry:
+                entry["echo_index"] = fallback_index
+            entries.append(entry)
+        return sorted(entries, key=lambda item: item["distance_m"])
+
+    @staticmethod
+    def _typical_echo_gap(medians: list[float]) -> float:
+        sorted_medians = sorted(float(value) for value in medians if math.isfinite(float(value)))
+        gaps = [right - left for left, right in zip(sorted_medians, sorted_medians[1:]) if right > left]
+        if not gaps:
+            return 1.0
+        return max(0.001, sorted(gaps)[len(gaps) // 2])
+
+    @classmethod
+    def _align_echo_rows_to_medians(
+        cls,
+        rows: list[list[dict[str, Any]]],
+        medians: list[float],
+        *,
+        typical_gap: float,
+    ) -> list[list[dict[str, Any] | None]]:
+        return [cls._align_echo_row_to_medians(row, medians, typical_gap=typical_gap) for row in rows]
+
+    @staticmethod
+    def _align_echo_row_to_medians(
+        row: list[dict[str, Any]],
+        medians: list[float],
+        *,
+        typical_gap: float,
+    ) -> list[dict[str, Any] | None]:
+        column_count = len(medians)
+        skip_penalty = max(0.05, typical_gap * 0.45)
+        memo: dict[tuple[int, int], tuple[float, tuple[int | None, ...]]] = {}
+
+        def solve(value_index: int, median_index: int) -> tuple[float, tuple[int | None, ...]]:
+            key = (value_index, median_index)
+            if key in memo:
+                return memo[key]
+            if median_index >= column_count:
+                if value_index >= len(row):
+                    result = (0.0, ())
+                else:
+                    result = (skip_penalty * (len(row) - value_index) * 2.0, ())
+                memo[key] = result
+                return result
+            if value_index >= len(row):
+                result = (skip_penalty * (column_count - median_index), (None,) * (column_count - median_index))
+                memo[key] = result
+                return result
+
+            skip_cost, skip_assignment = solve(value_index, median_index + 1)
+            best_cost = skip_cost + skip_penalty
+            best_assignment: tuple[int | None, ...] = (None,) + skip_assignment
+
+            assign_cost, assign_assignment = solve(value_index + 1, median_index + 1)
+            distance_cost = abs(row[value_index]["distance_m"] - medians[median_index])
+            total_assign_cost = assign_cost + distance_cost
+            if total_assign_cost < best_cost:
+                best_cost = total_assign_cost
+                best_assignment = (value_index,) + assign_assignment
+            memo[key] = (best_cost, best_assignment)
+            return memo[key]
+
+        _cost, assignment = solve(0, 0)
+        aligned = [row[index] if index is not None and 0 <= index < len(row) else None for index in assignment]
+        if len(aligned) < column_count:
+            aligned.extend([None] * (column_count - len(aligned)))
+        return aligned[:column_count]
+
+    @staticmethod
+    def _median_distances_from_assignments(
+        assignments: list[list[dict[str, Any] | None]],
+        *,
+        fallback: list[float],
+    ) -> list[float]:
+        medians: list[float] = []
+        for column_index, fallback_value in enumerate(fallback):
+            values = [
+                row[column_index]["distance_m"]
+                for row in assignments
+                if column_index < len(row) and row[column_index] is not None
+            ]
+            if values:
+                medians.append(float(np.median(values)))
+            else:
+                medians.append(fallback_value)
+        return medians
+
+    @staticmethod
+    def _mad_inlier_entries(entries: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        if len(entries) < 3:
+            return entries, []
+        values = np.array([entry["distance_m"] for entry in entries], dtype=float)
+        median = float(np.median(values))
+        deviations = np.abs(values - median)
+        mad = float(np.median(deviations))
+        if mad <= 1e-12:
+            mask = deviations <= 1e-9
+        else:
+            modified_z_scores = 0.6745 * deviations / mad
+            mask = modified_z_scores <= ECHO_SUMMARY_MAD_THRESHOLD
+        inliers = [entry for entry, keep in zip(entries, mask) if bool(keep)]
+        outliers = [entry for entry, keep in zip(entries, mask) if not bool(keep)]
+        return inliers, outliers
 
     def _clear_results_table(self) -> None:
         self.results_table.delete(*self.results_table.get_children())

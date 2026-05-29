@@ -2043,3 +2043,56 @@ def test_import_logs_appends_records_without_clearing_existing_results(tmp_path,
 
     assert cleared["called"] is False
     assert imported == [payload]
+
+
+def _summary_record(point_index: int, distances: list[float]) -> dict:
+    return {
+        "global_index": 0,
+        "point_index": point_index,
+        "navigation": {"state": "succeeded"},
+        "measurement": {
+            "status": "succeeded",
+            "result": {
+                "echo_delays": [
+                    {"echo_index": index, "distance_m": distance, "delta_lag": distance / 1.5}
+                    for index, distance in enumerate(distances)
+                ]
+            },
+        },
+        "error": None,
+    }
+
+
+def test_summarize_records_by_point_index_uses_mad_mean_for_echoes() -> None:
+    records = [
+        _summary_record(0, [10.0, 20.0]),
+        _summary_record(0, [10.2, 20.2]),
+        _summary_record(0, [9.8, 19.8]),
+        _summary_record(0, [80.0, 20.1]),
+        _summary_record(1, [5.0]),
+    ]
+
+    summarized = MissionWorkflowWindow._summarize_records_by_point_index(records)
+
+    assert len(summarized) == 2
+    first_delays = summarized[0]["measurement"]["result"]["echo_delays"]
+    assert first_delays[0]["distance_m"] == 10.0
+    assert first_delays[1]["distance_m"] == 20.025
+    assert summarized[0]["measurement"]["result"]["summary"]["outlier_count"] == 1
+    assert summarized[0]["measurement"]["result"]["summary"]["source_record_count"] == 4
+    assert summarized[1]["measurement"]["result"]["echo_delays"][0]["distance_m"] == 5.0
+
+
+def test_summarize_records_aligns_missing_middle_echo_by_distance_not_column() -> None:
+    records = [
+        _summary_record(0, [10.0, 20.0, 30.0]),
+        _summary_record(0, [10.2, 30.2]),
+        _summary_record(0, [9.8, 19.8, 29.8]),
+    ]
+
+    summarized = MissionWorkflowWindow._summarize_records_by_point_index(records)
+
+    delays = summarized[0]["measurement"]["result"]["echo_delays"]
+    assert [delay["distance_m"] for delay in delays] == [10.0, 19.9, 30.0]
+    columns = summarized[0]["measurement"]["result"]["summary"]["echo_columns"]
+    assert [column["source_count"] for column in columns] == [3, 2, 3]
