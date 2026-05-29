@@ -269,6 +269,36 @@ def test_draw_selected_echo_overlay_renders_all_selected_results() -> None:
 
 
 
+
+def test_draw_selected_echo_overlay_draws_evaluation_points_above_ellipses() -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    window._selected_result_index = 0
+    window._selected_result_indices = (0, 1)
+    window._records = [
+        {
+            "live_position_at_measurement": {"x": 7.0, "y": -2.0},
+            "measurement": {"result": {"echo_delays": [{"distance_m": 3.0}]}},
+        },
+        {
+            "live_position_at_measurement": {"x": 8.0, "y": -1.0},
+            "measurement": {"result": {"echo_delays": [{"distance_m": 4.0}]}},
+        },
+    ]
+    window._rx_antenna_global_position = (1.0, 1.0)
+    window.echo_heatmap_evaluation_visible_var = SimpleNamespace(get=lambda: True)
+    window.echo_heatmap_ellipses_visible_var = SimpleNamespace(get=lambda: True)
+    draw_order: list[str] = []
+    window._draw_echo_ellipse_for_overlay = lambda **_kwargs: draw_order.append("ellipse")
+    window._draw_selected_echo_probability_overlay = (
+        lambda **_kwargs: draw_order.append("evaluation") or True
+    )
+
+    overlay_visible = window._draw_selected_echo_overlay()
+
+    assert overlay_visible is True
+    assert draw_order == ["ellipse", "ellipse", "evaluation"]
+
+
 def test_draw_selected_echo_overlay_hides_multi_selection_ellipses_by_default() -> None:
     window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
     window._selected_result_index = 0
