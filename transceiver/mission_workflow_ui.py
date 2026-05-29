@@ -3096,34 +3096,29 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         return points
 
     def _draw_selected_lidar_reference_overlay(self) -> None:
-        selected_indices = getattr(self, "_selected_result_indices", ())
-        if len(selected_indices) > 1:
-            return
-        record = self._selected_record_payload()
-        if record is None:
-            return
-        measurement_position = self._selected_record_measurement_position(record)
-        if measurement_position is None:
-            return
-        measurement = record.get("measurement")
-        if not isinstance(measurement, dict):
-            return
-        result = measurement.get("result")
-        if not isinstance(result, dict):
-            return
-        lidar_reference = result.get("lidar_reference")
-        if not isinstance(lidar_reference, dict):
-            return
-        lidar_file = lidar_reference.get("output_file")
-        if not isinstance(lidar_file, str) or not lidar_file.strip():
-            return
-        scan = self._load_lidar_scan_for_overlay(lidar_file)
-        if scan is None:
-            return
-        overlay_point = self._selected_record_overlay_point(record, measurement_position=measurement_position)
-        if overlay_point is None:
-            return
-        self._draw_lidar_scan_overlay_for_point(point=overlay_point, scan=scan)
+        for record in self._selected_record_payloads():
+            measurement_position = self._selected_record_measurement_position(record)
+            if measurement_position is None:
+                continue
+            measurement = record.get("measurement")
+            if not isinstance(measurement, dict):
+                continue
+            result = measurement.get("result")
+            if not isinstance(result, dict):
+                continue
+            lidar_reference = result.get("lidar_reference")
+            if not isinstance(lidar_reference, dict):
+                continue
+            lidar_file = lidar_reference.get("output_file")
+            if not isinstance(lidar_file, str) or not lidar_file.strip():
+                continue
+            scan = self._load_lidar_scan_for_overlay(lidar_file)
+            if scan is None:
+                continue
+            overlay_point = self._selected_record_overlay_point(record, measurement_position=measurement_position)
+            if overlay_point is None:
+                continue
+            self._draw_lidar_scan_overlay_for_point(point=overlay_point, scan=scan)
 
     def _selected_record_payload(self) -> dict[str, Any] | None:
         selected_idx = self._selected_result_index

@@ -561,7 +561,7 @@ def test_draw_selected_lidar_reference_overlay_uses_live_measurement_position() 
     assert point.y == -2.0
 
 
-def test_draw_selected_lidar_reference_overlay_skips_multiple_selected_results() -> None:
+def test_draw_selected_lidar_reference_overlay_draws_multiple_selected_results() -> None:
     window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
     window._selected_result_index = 0
     window._selected_result_indices = (0, 1)
@@ -587,7 +587,13 @@ def test_draw_selected_lidar_reference_overlay_skips_multiple_selected_results()
 
     window._draw_selected_lidar_reference_overlay()
 
-    assert calls == []
+    assert len(calls) == 2
+    points = [call["point"] for call in calls]
+    assert all(isinstance(point, MeasurementPoint) for point in points)
+    assert [(point.x, point.y) for point in points if isinstance(point, MeasurementPoint)] == [
+        (7.0, -2.0),
+        (8.0, -1.0),
+    ]
 
 
 def test_resolve_cmd_vel_topic_uses_namespace_when_present() -> None:
