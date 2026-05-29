@@ -399,6 +399,8 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self.echo_heatmap_antenna_opening_angle_deg_var = tk.StringVar(
             value=f"{MULTI_SELECTION_ECHO_DOT_ANTENNA_OPENING_ANGLE_DEG:g}"
         )
+        self.echo_heatmap_evaluation_visible_var = tk.BooleanVar(value=True)
+        self.echo_heatmap_ellipses_visible_var = tk.BooleanVar(value=False)
         self._echo_heatmap_settings_trace_pending = False
         self._live_pose_stream_active = False
 
@@ -469,6 +471,18 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         )
         return min(360.0, angle)
 
+    def _echo_heatmap_evaluation_visible(self) -> bool:
+        variable = getattr(self, "echo_heatmap_evaluation_visible_var", None)
+        if variable is None:
+            return True
+        return bool(variable.get())
+
+    def _echo_heatmap_ellipses_visible(self) -> bool:
+        variable = getattr(self, "echo_heatmap_ellipses_visible_var", None)
+        if variable is None:
+            return False
+        return bool(variable.get())
+
     def _build_echo_heatmap_settings_overlay(self) -> tk.Frame:
         frame = tk.Frame(
             self.map_preview_canvas,
@@ -521,6 +535,28 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             validatecommand=(self.register(self._validate_positive_float_input), "%P"),
             **entry_kwargs,
         ).grid(row=3, column=1, sticky="w", padx=(2, 8), pady=(2, 6))
+        checkbutton_kwargs = {
+            "bg": "#20242a",
+            "fg": "#f5f5f5",
+            "activebackground": "#20242a",
+            "activeforeground": "#f5f5f5",
+            "selectcolor": "#2f3640",
+            "anchor": "w",
+        }
+        tk.Checkbutton(
+            frame,
+            text="Auswertung anzeigen",
+            variable=self.echo_heatmap_evaluation_visible_var,
+            command=self._on_echo_heatmap_settings_changed,
+            **checkbutton_kwargs,
+        ).grid(row=4, column=0, columnspan=2, sticky="ew", padx=8, pady=(2, 0))
+        tk.Checkbutton(
+            frame,
+            text="Ellipsen anzeigen",
+            variable=self.echo_heatmap_ellipses_visible_var,
+            command=self._on_echo_heatmap_settings_changed,
+            **checkbutton_kwargs,
+        ).grid(row=5, column=0, columnspan=2, sticky="ew", padx=8, pady=(0, 6))
         return frame
 
     def _sync_echo_heatmap_settings_overlay(self, *, visible: bool) -> None:
@@ -673,6 +709,12 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             "write", lambda *_args: self._on_echo_heatmap_settings_changed()
         )
         self.echo_heatmap_antenna_opening_angle_deg_var.trace_add(
+            "write", lambda *_args: self._on_echo_heatmap_settings_changed()
+        )
+        self.echo_heatmap_evaluation_visible_var.trace_add(
+            "write", lambda *_args: self._on_echo_heatmap_settings_changed()
+        )
+        self.echo_heatmap_ellipses_visible_var.trace_add(
             "write", lambda *_args: self._on_echo_heatmap_settings_changed()
         )
         self._map_image_original: tk.PhotoImage | None = None
@@ -1640,6 +1682,8 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             self._measurement_end_world_position,
             self._echo_heatmap_imaginary_line_width_cm(),
             self._echo_heatmap_min_visible_overlap(),
+            self._echo_heatmap_evaluation_visible(),
+            self._echo_heatmap_ellipses_visible(),
             self._pending_nav2point_world_position,
             self._pending_nav2point_yaw_radians,
             self._pending_waypoint_world_position,
@@ -2526,10 +2570,18 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         if rx_position is None:
             return False
         selected_records = self._selected_record_payloads()
-        if len(selected_records) > 1 and self._draw_selected_echo_probability_overlay(
-            rx_position=rx_position,
-            records=selected_records,
+        multiple_records_selected = len(selected_records) > 1
+        if (
+            multiple_records_selected
+            and self._echo_heatmap_evaluation_visible()
+            and self._draw_selected_echo_probability_overlay(
+                rx_position=rx_position,
+                records=selected_records,
+            )
+            and not self._echo_heatmap_ellipses_visible()
         ):
+            return True
+        if multiple_records_selected and not self._echo_heatmap_ellipses_visible():
             return True
         for record in selected_records:
             measurement_position = self._selected_record_measurement_position(record)
@@ -2552,7 +2604,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                     echo_distance_m=echo_distance,
                     color=color,
                 )
-        return False
+        return multiple_records_selected
 
     def _draw_selected_echo_probability_overlay(
         self,
@@ -3768,6 +3820,8 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             "echo_heatmap_imaginary_line_width_cm": self._echo_heatmap_imaginary_line_width_cm(),
             "echo_heatmap_min_visible_overlap": self._echo_heatmap_min_visible_overlap(),
             "echo_heatmap_antenna_opening_angle_deg": self._echo_heatmap_antenna_opening_angle_deg(),
+            "echo_heatmap_evaluation_visible": self._echo_heatmap_evaluation_visible(),
+            "echo_heatmap_ellipses_visible": self._echo_heatmap_ellipses_visible(),
             "records": self._records,
         }
 
@@ -3882,6 +3936,12 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             )
             self.echo_heatmap_antenna_opening_angle_deg_var.set(
                 f"{min(360.0, echo_heatmap_antenna_opening_angle_deg):g}"
+            )
+            self.echo_heatmap_evaluation_visible_var.set(
+                bool(payload.get("echo_heatmap_evaluation_visible", True))
+            )
+            self.echo_heatmap_ellipses_visible_var.set(
+                bool(payload.get("echo_heatmap_ellipses_visible", False))
             )
             self._refresh_points_table()
             self._refresh_map_section()
