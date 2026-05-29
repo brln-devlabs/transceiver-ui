@@ -619,7 +619,7 @@ def test_draw_selected_lidar_reference_overlay_draws_multiple_selected_results()
 
 
 
-def test_draw_lidar_wall_estimate_reports_visible_red_point_std_deviation() -> None:
+def test_draw_lidar_wall_estimate_reports_visible_red_point_std_deviation_and_rms() -> None:
     class FakeCanvas:
         def create_line(self, *_coords: float, **_kwargs: object) -> int:
             return 1
@@ -647,7 +647,7 @@ def test_draw_lidar_wall_estimate_reports_visible_red_point_std_deviation() -> N
     window._draw_lidar_wall_estimate(estimate)
 
     assert messages
-    assert "σ sichtbare rote Punkte=100.0cm (2 Punkte)" in messages[0]
+    assert "σ sichtbare rote Punkte=100.0cm, RMS sichtbare rote Punkte=100.0cm (2 Punkte)" in messages[0]
 
 
 def test_draw_selected_echo_probability_overlay_tracks_visible_red_world_points() -> None:
