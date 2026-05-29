@@ -9,6 +9,7 @@ from transceiver.measurement_mission import MeasurementMission, MeasurementPoint
 from transceiver.navigation_adapter import NavigationPoint
 from transceiver.mission_workflow_ui import (
     RESULTS_TABLE_EMPTY_ROW_IID,
+    LidarWallEstimate,
     MissionWorkflowWindow,
     _compute_bistatic_echo_ellipse_axes,
     _estimate_lower_horizontal_lidar_wall,
@@ -615,6 +616,70 @@ def test_draw_selected_lidar_reference_overlay_draws_multiple_selected_results()
         (7.0, -2.0),
         (8.0, -1.0),
     ]
+
+
+
+def test_draw_lidar_wall_estimate_reports_visible_red_point_std_deviation() -> None:
+    class FakeCanvas:
+        def create_line(self, *_coords: float, **_kwargs: object) -> int:
+            return 1
+
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    window._map_image_original = SimpleNamespace(height=lambda: 100)
+    window._map_preview_scale = (1.0, 1.0)
+    window._map_preview_offset = (0.0, 0.0)
+    window._world_to_map_pixel = lambda *, x, y, image_height: (x, y)
+    window.map_preview_canvas = FakeCanvas()
+    window._last_visible_red_echo_probability_world_points = [(0.0, 1.0), (1.0, -1.0)]
+    messages: list[str] = []
+    window._append_validation = messages.append
+    estimate = LidarWallEstimate(
+        slope=0.0,
+        intercept=0.0,
+        start=(0.0, 0.0),
+        end=(1.0, 0.0),
+        point_count=8,
+        residual_mean_m=0.01,
+        residual_std_m=0.02,
+        residual_rms_m=0.03,
+    )
+
+    window._draw_lidar_wall_estimate(estimate)
+
+    assert messages
+    assert "σ sichtbare rote Punkte=100.0cm (2 Punkte)" in messages[0]
+
+
+def test_draw_selected_echo_probability_overlay_tracks_visible_red_world_points() -> None:
+    class FakeCanvas:
+        def __init__(self) -> None:
+            self.ovals: list[tuple[tuple[float, ...], dict[str, object]]] = []
+
+        def create_oval(self, *coords: float, **kwargs: object) -> int:
+            self.ovals.append((coords, kwargs))
+            return len(self.ovals)
+
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    window._mission = SimpleNamespace(map_config=SimpleNamespace(resolution=1.0))
+    window._map_image_original = SimpleNamespace(height=lambda: 100)
+    window.map_preview_canvas = FakeCanvas()
+    window.echo_heatmap_min_visible_overlap_var = SimpleNamespace(get=lambda: "1")
+    window.echo_heatmap_imaginary_line_width_var = SimpleNamespace(get=lambda: "4")
+    window._append_validation = lambda _message: None
+    window._preview_pixel_to_world = lambda *, preview_x, preview_y: (preview_x / 10.0, preview_y / 10.0)
+    window._build_echo_overlay_preview_points = lambda **_kwargs: ([10.0, 20.0], 1)
+    records = [
+        {
+            "live_position_at_measurement": {"x": float(index), "y": 0.0},
+            "measurement": {"result": {"echo_delays": [{"distance_m": 1.0}]}},
+        }
+        for index in range(2)
+    ]
+
+    drawn = window._draw_selected_echo_probability_overlay(rx_position=(0.0, 0.0), records=records)
+
+    assert drawn is True
+    assert window._last_visible_red_echo_probability_world_points == [(1.0, 2.0)]
 
 
 def test_resolve_cmd_vel_topic_uses_namespace_when_present() -> None:

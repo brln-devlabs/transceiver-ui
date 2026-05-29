@@ -890,6 +890,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._lidar_reference_scan_cache: dict[str, dict[str, Any] | None] = {}
         self._ellipse_unit_circle_cache: dict[int, tuple[tuple[float, float], ...]] = {}
         self._live_echo_geometry_cache: dict[str, dict[str, Any]] = {}
+        self._last_visible_red_echo_probability_world_points: list[tuple[float, float]] = []
         self._last_live_diagnosis_key: str | None = None
         self._emit_live_diagnostics_to_validation = True
         self._rx_antenna_global_position: tuple[float, float] | None = None
@@ -1872,6 +1873,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._draw_pending_waypoint_marker()
         self._draw_rx_antenna_marker()
         self._draw_measurement_overlay()
+        self._last_visible_red_echo_probability_world_points = []
         echo_heatmap_active = self._draw_selected_echo_overlay()
         self._draw_selected_lidar_reference_overlay()
         self._raise_selected_echo_probability_overlay()
@@ -2786,6 +2788,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         resolution = mission.map_config.resolution
         if not math.isfinite(resolution) or resolution <= 0.0:
             return False
+        self._last_visible_red_echo_probability_world_points = []
         ellipse_point_cells: dict[tuple[int, int], dict[str, Any]] = {}
         imaginary_line_width_cm = self._echo_heatmap_imaginary_line_width_cm()
         if not math.isfinite(imaginary_line_width_cm) or imaginary_line_width_cm <= 0.0:
@@ -2901,6 +2904,13 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 outline="",
                 tags=("selected_echo_probability_dot",),
             )
+            if color == MULTI_SELECTION_ECHO_DOT_OVERLAP_COLOR:
+                try:
+                    world_point = self._preview_pixel_to_world(preview_x=center_x, preview_y=center_y)
+                except Exception:
+                    world_point = None
+                if world_point is not None:
+                    self._last_visible_red_echo_probability_world_points.append(world_point)
             drawn_points += 1
         if MULTI_SELECTION_PROBABILITY_DEBUG_LOG:
             self._append_validation(
@@ -3408,6 +3418,28 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             world_points.append((end_world_x, end_world_y))
         return world_points
 
+    @staticmethod
+    def _line_residual_std_m(
+        points: list[tuple[float, float]],
+        *,
+        slope: float,
+        intercept: float,
+    ) -> float | None:
+        finite_points = [
+            (float(x), float(y))
+            for x, y in points
+            if math.isfinite(float(x)) and math.isfinite(float(y))
+        ]
+        if not finite_points:
+            return None
+        residuals = _lidar_line_residuals(finite_points, slope=slope, intercept=intercept)
+        if residuals.size == 0:
+            return None
+        finite_residuals = residuals[np.isfinite(residuals)]
+        if finite_residuals.size == 0:
+            return None
+        return float(np.std(finite_residuals))
+
     def _draw_lidar_wall_estimate(self, estimate: LidarWallEstimate) -> None:
         original = self._map_image_original
         if original is None:
@@ -3438,6 +3470,18 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             fill=LIDAR_WALL_LINE_COLOR,
             width=LIDAR_WALL_LINE_WIDTH_PX,
         )
+        red_points = getattr(self, "_last_visible_red_echo_probability_world_points", [])
+        red_points_std_m = self._line_residual_std_m(
+            red_points,
+            slope=estimate.slope,
+            intercept=estimate.intercept,
+        )
+        red_points_summary = ""
+        if red_points_std_m is not None:
+            red_points_summary = (
+                f", σ sichtbare rote Punkte={red_points_std_m * 100.0:.1f}cm "
+                f"({len(red_points)} Punkte)"
+            )
         self._append_validation(
             "ℹ️ LiDAR-Wand: "
             f"{estimate.point_count} Punkte, "
@@ -3445,6 +3489,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             f"σ={estimate.residual_std_m * 100.0:.1f}cm, "
             f"mittl. |Abweichung|={estimate.residual_mean_m * 100.0:.1f}cm, "
             f"RMS={estimate.residual_rms_m * 100.0:.1f}cm"
+            f"{red_points_summary}"
         )
 
     def _draw_lidar_scan_overlay_for_point(self, *, point: MeasurementPoint, scan: dict[str, Any]) -> None:
