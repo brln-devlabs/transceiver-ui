@@ -837,20 +837,27 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         ctk.CTkButton(map_top_controls, text="Map-Config wählen", command=self._select_map_config_file).grid(
             row=0, column=0, sticky="w"
         )
+        self.lidar_measurement_area_btn = ctk.CTkButton(
+            map_top_controls,
+            text="Messwand",
+            command=self._toggle_lidar_measurement_area_edit_mode,
+            width=110,
+        )
+        self.lidar_measurement_area_btn.grid(row=0, column=1, padx=(6, 0), sticky="w")
         self.measurement_map_pick_mode_btn = ctk.CTkButton(
             map_top_controls,
-            text="ruler",
+            text="Lineal",
             command=self._toggle_measurement_map_pick_mode,
             width=110,
         )
-        self.measurement_map_pick_mode_btn.grid(row=0, column=1, padx=(6, 0), sticky="w")
+        self.measurement_map_pick_mode_btn.grid(row=0, column=2, padx=(6, 0), sticky="w")
         self.nav2point_map_pick_mode_btn = ctk.CTkButton(
             map_top_controls,
             text="nav2point",
             command=self._toggle_nav2point_map_pick_mode,
             width=110,
         )
-        self.nav2point_map_pick_mode_btn.grid(row=0, column=2, padx=(6, 0), sticky="w")
+        self.nav2point_map_pick_mode_btn.grid(row=0, column=3, padx=(6, 0), sticky="w")
         self.map_status_var = tk.StringVar(value="Karte nicht konfiguriert.")
         ctk.CTkLabel(map_frame, textvariable=self.map_status_var, anchor="w").grid(
             row=1, column=0, sticky="ew", padx=8, pady=(0, 6)
@@ -989,13 +996,6 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         ctk.CTkLabel(rx_position_controls, text="°").grid(
             row=1, column=3, padx=(0, 10), pady=(6, 0), sticky="w"
         )
-        self.lidar_measurement_area_btn = ctk.CTkButton(
-            rx_position_controls,
-            text="Messbereich",
-            command=self._toggle_lidar_measurement_area_edit_mode,
-            width=110,
-        )
-        self.lidar_measurement_area_btn.grid(row=2, column=0, padx=(0, 4), pady=(6, 0), sticky="w")
         ctk.CTkLabel(rx_position_controls, text="Linienstärke cm").grid(
             row=1, column=4, padx=(0, 4), pady=(6, 0), sticky="w"
         )
@@ -1526,7 +1526,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 return
             self._set_lidar_measurement_area(area)
             self._append_validation(
-                "✅ LiDAR-Messbereich gesetzt: "
+                "✅ LiDAR-Messwand gesetzt: "
                 f"x={area.min_x:.3f}…{area.max_x:.3f}, y={area.min_y:.3f}…{area.max_y:.3f}"
             )
             return
@@ -1631,7 +1631,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             self._lidar_measurement_area_drag_current_world = None
             lidar_area_button = getattr(self, "lidar_measurement_area_btn", None)
             if lidar_area_button is not None:
-                lidar_area_button.configure(text="Messbereich")
+                lidar_area_button.configure(text="Messwand")
         button_text = "✕" if enabled else "🖱️"
         self.rx_antenna_map_pick_mode_btn.configure(text=button_text)
         self._update_map_canvas_cursor()
@@ -1649,7 +1649,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             self._measurement_end_world_position = None
             measurement_button = getattr(self, "measurement_map_pick_mode_btn", None)
             if measurement_button is not None:
-                measurement_button.configure(text="ruler")
+                measurement_button.configure(text="Lineal")
             self._nav2point_map_pick_mode_enabled = False
             nav2point_button = getattr(self, "nav2point_map_pick_mode_btn", None)
             if nav2point_button is not None:
@@ -1659,7 +1659,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             self._lidar_measurement_area_drag_current_world = None
             lidar_area_button = getattr(self, "lidar_measurement_area_btn", None)
             if lidar_area_button is not None:
-                lidar_area_button.configure(text="Messbereich")
+                lidar_area_button.configure(text="Messwand")
         else:
             self._clear_pending_waypoint_marker()
         self.waypoint_map_pick_mode_btn.configure(text="✕" if enabled else "🖱️")
@@ -1681,7 +1681,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             self._lidar_measurement_area_edit_enabled = True
         button = getattr(self, "lidar_measurement_area_btn", None)
         if button is not None:
-            button.configure(text="✕" if enabled else "Messbereich")
+            button.configure(text="✕" if enabled else "Messwand")
         self._update_map_canvas_cursor()
         self._draw_map_preview()
 
@@ -1784,7 +1784,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self.map_preview_canvas.create_text(
             left + 6,
             top + 6,
-            text="Messbereich",
+            text="Messwand",
             anchor="nw",
             fill="#e3f2fd",
             font=("TkDefaultFont", 10, "bold"),
@@ -1801,13 +1801,13 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             self._lidar_measurement_area_drag_current_world = None
             lidar_area_button = getattr(self, "lidar_measurement_area_btn", None)
             if lidar_area_button is not None:
-                lidar_area_button.configure(text="Messbereich")
+                lidar_area_button.configure(text="Messwand")
         else:
             self._measurement_start_world_position = None
             self._measurement_end_world_position = None
         measurement_button = getattr(self, "measurement_map_pick_mode_btn", None)
         if measurement_button is not None:
-            measurement_button.configure(text="✕" if enabled else "ruler")
+            measurement_button.configure(text="✕" if enabled else "Lineal")
         self._update_map_canvas_cursor()
         self._draw_map_preview()
 
@@ -1825,7 +1825,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             self._lidar_measurement_area_drag_current_world = None
             lidar_area_button = getattr(self, "lidar_measurement_area_btn", None)
             if lidar_area_button is not None:
-                lidar_area_button.configure(text="Messbereich")
+                lidar_area_button.configure(text="Messwand")
         else:
             self._clear_pending_nav2point_marker()
         nav2point_button = getattr(self, "nav2point_map_pick_mode_btn", None)
