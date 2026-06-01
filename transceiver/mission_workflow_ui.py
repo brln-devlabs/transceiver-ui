@@ -192,7 +192,7 @@ class LineResidualMetrics:
     residual_signed_mean_m: float
     residual_abs_mean_m: float
     residual_std_m: float
-    residual_rms_m: float
+    residual_rmse_m: float
 
 
 @dataclass(frozen=True)
@@ -206,7 +206,7 @@ class LidarWallEstimate:
     point_count: int
     residual_mean_m: float
     residual_std_m: float
-    residual_rms_m: float
+    residual_rmse_m: float
 
 
 def _is_point_on_segment(
@@ -332,7 +332,7 @@ def _estimate_lidar_reference_wall(
         point_count=len(finite_points),
         residual_mean_m=float(np.mean(abs_residuals)),
         residual_std_m=float(np.std(finite_residuals)),
-        residual_rms_m=float(math.sqrt(np.mean(finite_residuals * finite_residuals))),
+        residual_rmse_m=float(math.sqrt(np.mean(finite_residuals * finite_residuals))),
     )
 
 
@@ -3990,7 +3990,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             residual_signed_mean_m=float(np.mean(finite_residuals)),
             residual_abs_mean_m=float(np.mean(np.abs(finite_residuals))),
             residual_std_m=float(np.std(finite_residuals)),
-            residual_rms_m=float(math.sqrt(np.mean(finite_residuals * finite_residuals))),
+            residual_rmse_m=float(math.sqrt(np.mean(finite_residuals * finite_residuals))),
         )
 
     def _draw_lidar_wall_estimate(self, estimate: LidarWallEstimate) -> None:
@@ -4036,7 +4036,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 f"  Punkte: {red_points_metrics_m.point_count}\n"
                 f"  mittl. signed Abweichung: {red_points_metrics_m.residual_signed_mean_m * 100.0:.1f} cm\n"
                 f"  mittl. |Abweichung|: {red_points_metrics_m.residual_abs_mean_m * 100.0:.1f} cm\n"
-                f"  RMS: {red_points_metrics_m.residual_rms_m * 100.0:.1f} cm\n"
+                f"  RMSE: {red_points_metrics_m.residual_rmse_m * 100.0:.1f} cm\n"
                 f"  σ: {red_points_metrics_m.residual_std_m * 100.0:.1f} cm"
             )
         intercept_sign = "+" if estimate.intercept >= 0.0 else "-"

@@ -801,7 +801,7 @@ def test_draw_lidar_wall_estimate_reports_readable_reference_and_radar_residual_
         point_count=8,
         residual_mean_m=0.01,
         residual_std_m=0.02,
-        residual_rms_m=0.03,
+        residual_rmse_m=0.03,
     )
 
     window._draw_lidar_wall_estimate(estimate)
@@ -816,7 +816,7 @@ def test_draw_lidar_wall_estimate_reports_readable_reference_and_radar_residual_
         "  Punkte: 2\n"
         "  mittl. signed Abweichung: 0.0 cm\n"
         "  mittl. |Abweichung|: 100.0 cm\n"
-        "  RMS: 100.0 cm\n"
+        "  RMSE: 100.0 cm\n"
         "  σ: 100.0 cm"
     ]
 
