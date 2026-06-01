@@ -9,6 +9,7 @@ from transceiver.measurement_mission import MeasurementMission, MeasurementPoint
 from transceiver.navigation_adapter import NavigationPoint
 from transceiver.mission_workflow_ui import (
     RESULTS_TABLE_EMPTY_ROW_IID,
+    LidarMeasurementArea,
     LidarWallEstimate,
     MissionWorkflowWindow,
     _compute_bistatic_echo_ellipse_axes,
@@ -29,6 +30,29 @@ def test_estimate_lower_horizontal_lidar_wall_ignores_upper_walls_and_columns() 
     assert estimate.intercept == pytest.approx(1.0, abs=0.03)
     assert estimate.residual_std_m == pytest.approx(0.01, abs=0.004)
 
+
+def test_estimate_lower_horizontal_lidar_wall_uses_measurement_area_instead_of_lower_half() -> None:
+    lower_wall = [(x / 10.0, 1.0 + (0.01 if x % 2 else -0.01)) for x in range(0, 31)]
+    selected_upper_wall = [(x / 10.0, 3.0 + (0.01 if x % 2 else -0.01)) for x in range(0, 31)]
+    measurement_area = LidarMeasurementArea(min_x=-0.1, min_y=2.8, max_x=3.1, max_y=3.2)
+
+    estimate = _estimate_lower_horizontal_lidar_wall(
+        lower_wall + selected_upper_wall,
+        measurement_area=measurement_area,
+    )
+
+    assert estimate is not None
+    assert estimate.point_count >= len(selected_upper_wall) - 2
+    assert estimate.intercept == pytest.approx(3.0, abs=0.03)
+
+
+def test_estimate_lower_horizontal_lidar_wall_rejects_measurement_area_with_too_few_points() -> None:
+    lower_wall = [(x / 10.0, 1.0) for x in range(0, 31)]
+    measurement_area = LidarMeasurementArea(min_x=0.0, min_y=2.0, max_x=1.0, max_y=3.0)
+
+    estimate = _estimate_lower_horizontal_lidar_wall(lower_wall, measurement_area=measurement_area)
+
+    assert estimate is None
 
 def test_estimate_lower_horizontal_lidar_wall_rejects_too_few_points() -> None:
     estimate = _estimate_lower_horizontal_lidar_wall([(0.0, 1.0), (1.0, 1.0)])
