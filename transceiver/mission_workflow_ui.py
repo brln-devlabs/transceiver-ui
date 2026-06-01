@@ -4020,16 +4020,16 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         if red_points_metrics_m is not None:
             red_points_std_m, red_points_mean_m = red_points_metrics_m
             red_points_summary = (
-                f", σ Messpunkte={red_points_std_m * 100.0:.1f}cm, "
-                f"mittl. |Abweichung| Messpunkte={red_points_mean_m * 100.0:.1f}cm "
+                f", σ Radarmesspunkte={red_points_std_m * 100.0:.1f}cm, "
+                f"mittl. |Abweichung| Radarmesspunkte={red_points_mean_m * 100.0:.1f}cm "
                 f"({len(red_points)} Punkte)"
             )
         self._append_validation(
-            "ℹ️ LiDAR-Wand: "
+            "ℹ️ Messwand: "
             f"{estimate.point_count} Punkte, "
             f"y={estimate.slope:.4f}x+{estimate.intercept:.3f}, "
-            f"σ={estimate.residual_std_m * 100.0:.1f}cm, "
-            f"mittl. |Abweichung|={estimate.residual_mean_m * 100.0:.1f}cm"
+            f"σ LiDAR Messpunkte={estimate.residual_std_m * 100.0:.1f}cm, "
+            f"mittl. |Abweichung| LiDAR Messpunkte={estimate.residual_mean_m * 100.0:.1f}cm"
             f"{red_points_summary}"
         )
 
