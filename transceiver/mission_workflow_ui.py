@@ -62,9 +62,6 @@ LIDAR_OVERLAY_SMALL_MAP_MIN_CELL_FACTOR = 0.35
 LIDAR_OVERLAY_MIN_CELL_SIZE_PX = 1.0
 LIDAR_OVERLAY_SCANNER_YAW_OFFSET_RAD = math.pi / 2.0
 LIDAR_WALL_MIN_POINTS = 8
-LIDAR_WALL_BIN_SIZE_M = 0.05
-LIDAR_WALL_INLIER_THRESHOLD_M = 0.08
-LIDAR_WALL_MAX_ABS_SLOPE = math.tan(math.radians(12.0))
 LIDAR_WALL_LINE_COLOR = "#1E88E5"
 LIDAR_WALL_LINE_WIDTH_PX = 3
 MEASUREMENT_START_LIVE_POSITION_WAIT_TIMEOUT_S = 1.6
@@ -176,7 +173,7 @@ class LidarMeasurementArea:
 
 @dataclass(frozen=True)
 class LidarWallEstimate:
-    """Robust estimate for the lower horizontal LiDAR wall in map/world coordinates."""
+    """Least-squares estimate for a LiDAR reference line in map/world coordinates."""
 
     slope: float
     intercept: float
@@ -218,21 +215,18 @@ def _lidar_line_residuals(
     return (slope * x_values - y_values + intercept) / denominator
 
 
-def _estimate_lower_horizontal_lidar_wall(
+def _estimate_lidar_reference_wall(
     points: list[tuple[float, float]],
     *,
     measurement_area: LidarMeasurementArea | None = None,
     min_points: int = LIDAR_WALL_MIN_POINTS,
-    bin_size_m: float = LIDAR_WALL_BIN_SIZE_M,
-    inlier_threshold_m: float = LIDAR_WALL_INLIER_THRESHOLD_M,
-    max_abs_slope: float = LIDAR_WALL_MAX_ABS_SLOPE,
 ) -> LidarWallEstimate | None:
-    """Estimate the lower map wall from LiDAR hit points and ignore other structures.
+    """Estimate the LiDAR reference line with least-squares linear regression.
 
     If an explicit measurement area is configured, only points inside that
-    rectangle are considered.  Otherwise the full map is considered.  From the
-    selected points we choose the densest horizontal ``y`` band and then refine a
-    line with two residual-based rejections.
+    rectangle are considered. Otherwise all finite points from the map are used.
+    The fit intentionally does not search for a horizontal or dense wall band;
+    every selected point contributes to the regression and residual metrics.
     """
 
     finite_points = [
@@ -250,61 +244,19 @@ def _estimate_lower_horizontal_lidar_wall(
     if len(finite_points) < min_points:
         return None
 
-    selected_points = finite_points
-
-    safe_bin_size = bin_size_m if math.isfinite(bin_size_m) and bin_size_m > 0.0 else LIDAR_WALL_BIN_SIZE_M
-    band_buckets: dict[int, list[tuple[float, float]]] = {}
-    for point in selected_points:
-        band_buckets.setdefault(int(math.floor(point[1] / safe_bin_size)), []).append(point)
-    if not band_buckets:
-        return None
-    densest_band_index, _densest_band_points = max(
-        band_buckets.items(),
-        key=lambda item: (len(item[1]), -abs(item[0])),
-    )
-    adjacent_band_points = [
-        point
-        for band_index in (densest_band_index - 1, densest_band_index, densest_band_index + 1)
-        for point in band_buckets.get(band_index, [])
-    ]
-    if len(adjacent_band_points) < min_points:
-        return None
-
-    candidate_points = adjacent_band_points
-    fit = _fit_lidar_wall_line(candidate_points)
+    fit = _fit_lidar_wall_line(finite_points)
     if fit is None:
         return None
     slope, intercept = fit
-    if abs(slope) > max_abs_slope:
-        slope = 0.0
-        intercept = float(np.median([point[1] for point in candidate_points]))
 
-    threshold = inlier_threshold_m if math.isfinite(inlier_threshold_m) and inlier_threshold_m > 0.0 else LIDAR_WALL_INLIER_THRESHOLD_M
-    for _ in range(2):
-        residuals = _lidar_line_residuals(candidate_points, slope=slope, intercept=intercept)
-        if residuals.size < min_points:
-            return None
-        inliers = [
-            point
-            for point, residual in zip(candidate_points, residuals)
-            if math.isfinite(float(residual)) and abs(float(residual)) <= threshold
-        ]
-        if len(inliers) < min_points:
-            return None
-        fit = _fit_lidar_wall_line(inliers)
-        if fit is None:
-            return None
-        slope, intercept = fit
-        if abs(slope) > max_abs_slope:
-            slope = 0.0
-            intercept = float(np.median([point[1] for point in inliers]))
-        candidate_points = inliers
-
-    residuals = _lidar_line_residuals(candidate_points, slope=slope, intercept=intercept)
+    residuals = _lidar_line_residuals(finite_points, slope=slope, intercept=intercept)
     if residuals.size < min_points:
         return None
-    abs_residuals = np.abs(residuals)
-    x_values = [point[0] for point in candidate_points]
+    finite_residuals = residuals[np.isfinite(residuals)]
+    if finite_residuals.size < min_points:
+        return None
+    abs_residuals = np.abs(finite_residuals)
+    x_values = [point[0] for point in finite_points]
     start_x = min(x_values)
     end_x = max(x_values)
     if not math.isfinite(start_x) or not math.isfinite(end_x) or abs(end_x - start_x) < 1e-9:
@@ -316,10 +268,10 @@ def _estimate_lower_horizontal_lidar_wall(
         intercept=float(intercept),
         start=start,
         end=end,
-        point_count=len(candidate_points),
+        point_count=len(finite_points),
         residual_mean_m=float(np.mean(abs_residuals)),
-        residual_std_m=float(np.std(residuals)),
-        residual_rms_m=float(math.sqrt(np.mean(residuals * residuals))),
+        residual_std_m=float(np.std(finite_residuals)),
+        residual_rms_m=float(math.sqrt(np.mean(finite_residuals * finite_residuals))),
     )
 
 
@@ -3652,7 +3604,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             if lidar_reference_line_visible:
                 wall_points.extend(self._lidar_scan_world_points_for_point(point=overlay_point, scan=scan))
         if lidar_reference_line_visible:
-            estimate = _estimate_lower_horizontal_lidar_wall(
+            estimate = _estimate_lidar_reference_wall(
                 wall_points,
                 measurement_area=getattr(self, "_lidar_measurement_area", None),
             )
