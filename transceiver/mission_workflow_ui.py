@@ -699,7 +699,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         }
         tk.Checkbutton(
             frame,
-            text="Auswertung",
+            text="Radarmesspunkte",
             variable=self.echo_heatmap_evaluation_visible_var,
             command=self._on_echo_heatmap_settings_changed,
             **checkbutton_kwargs,
