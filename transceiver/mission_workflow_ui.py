@@ -839,7 +839,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         )
         self.measurement_map_pick_mode_btn = ctk.CTkButton(
             map_top_controls,
-            text="measurement",
+            text="ruler",
             command=self._toggle_measurement_map_pick_mode,
             width=110,
         )
@@ -1649,7 +1649,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             self._measurement_end_world_position = None
             measurement_button = getattr(self, "measurement_map_pick_mode_btn", None)
             if measurement_button is not None:
-                measurement_button.configure(text="measurement")
+                measurement_button.configure(text="ruler")
             self._nav2point_map_pick_mode_enabled = False
             nav2point_button = getattr(self, "nav2point_map_pick_mode_btn", None)
             if nav2point_button is not None:
@@ -1807,7 +1807,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             self._measurement_end_world_position = None
         measurement_button = getattr(self, "measurement_map_pick_mode_btn", None)
         if measurement_button is not None:
-            measurement_button.configure(text="✕" if enabled else "measurement")
+            measurement_button.configure(text="✕" if enabled else "ruler")
         self._update_map_canvas_cursor()
         self._draw_map_preview()
 
