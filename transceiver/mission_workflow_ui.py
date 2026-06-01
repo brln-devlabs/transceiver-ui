@@ -229,12 +229,10 @@ def _estimate_lower_horizontal_lidar_wall(
 ) -> LidarWallEstimate | None:
     """Estimate the lower map wall from LiDAR hit points and ignore other structures.
 
-    The map coordinate system used by ROS occupancy grids has increasing world ``y``
-    upwards.  If no explicit measurement area is configured, the lower wall in
-    the map preview therefore has a small world ``y`` value and we keep only that
-    lower half.  With a measurement area, only points inside that rectangle are
-    considered.  From the selected points we choose the densest horizontal ``y``
-    band and then refine a line with two residual-based rejections.
+    If an explicit measurement area is configured, only points inside that
+    rectangle are considered.  Otherwise the full map is considered.  From the
+    selected points we choose the densest horizontal ``y`` band and then refine a
+    line with two residual-based rejections.
     """
 
     finite_points = [
@@ -252,18 +250,11 @@ def _estimate_lower_horizontal_lidar_wall(
     if len(finite_points) < min_points:
         return None
 
-    if measurement_area is None:
-        y_values = np.asarray([point[1] for point in finite_points], dtype=float)
-        lower_cutoff = float(np.median(y_values))
-        lower_points = [point for point in finite_points if point[1] <= lower_cutoff]
-        if len(lower_points) < min_points:
-            lower_points = finite_points
-    else:
-        lower_points = finite_points
+    selected_points = finite_points
 
     safe_bin_size = bin_size_m if math.isfinite(bin_size_m) and bin_size_m > 0.0 else LIDAR_WALL_BIN_SIZE_M
     band_buckets: dict[int, list[tuple[float, float]]] = {}
-    for point in lower_points:
+    for point in selected_points:
         band_buckets.setdefault(int(math.floor(point[1] / safe_bin_size)), []).append(point)
     if not band_buckets:
         return None
