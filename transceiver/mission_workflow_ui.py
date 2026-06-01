@@ -165,6 +165,16 @@ def _operator_error_code(event_type: str, detail: str) -> str:
 
 
 @dataclass(frozen=True)
+class LidarMeasurementArea:
+    """Rectangular LiDAR wall measurement area in map/world coordinates."""
+
+    min_x: float
+    min_y: float
+    max_x: float
+    max_y: float
+
+
+@dataclass(frozen=True)
 class LidarWallEstimate:
     """Robust estimate for the lower horizontal LiDAR wall in map/world coordinates."""
 
@@ -211,6 +221,7 @@ def _lidar_line_residuals(
 def _estimate_lower_horizontal_lidar_wall(
     points: list[tuple[float, float]],
     *,
+    measurement_area: LidarMeasurementArea | None = None,
     min_points: int = LIDAR_WALL_MIN_POINTS,
     bin_size_m: float = LIDAR_WALL_BIN_SIZE_M,
     inlier_threshold_m: float = LIDAR_WALL_INLIER_THRESHOLD_M,
@@ -219,9 +230,11 @@ def _estimate_lower_horizontal_lidar_wall(
     """Estimate the lower map wall from LiDAR hit points and ignore other structures.
 
     The map coordinate system used by ROS occupancy grids has increasing world ``y``
-    upwards.  The lower wall in the map preview therefore has a small world ``y``
-    value.  We first keep only that lower half, choose the densest horizontal
-    ``y`` band, and then refine a line with two residual-based rejections.
+    upwards.  If no explicit measurement area is configured, the lower wall in
+    the map preview therefore has a small world ``y`` value and we keep only that
+    lower half.  With a measurement area, only points inside that rectangle are
+    considered.  From the selected points we choose the densest horizontal ``y``
+    band and then refine a line with two residual-based rejections.
     """
 
     finite_points = [
@@ -229,13 +242,23 @@ def _estimate_lower_horizontal_lidar_wall(
         for x, y in points
         if math.isfinite(float(x)) and math.isfinite(float(y))
     ]
+    if measurement_area is not None:
+        finite_points = [
+            point
+            for point in finite_points
+            if measurement_area.min_x <= point[0] <= measurement_area.max_x
+            and measurement_area.min_y <= point[1] <= measurement_area.max_y
+        ]
     if len(finite_points) < min_points:
         return None
 
-    y_values = np.asarray([point[1] for point in finite_points], dtype=float)
-    lower_cutoff = float(np.median(y_values))
-    lower_points = [point for point in finite_points if point[1] <= lower_cutoff]
-    if len(lower_points) < min_points:
+    if measurement_area is None:
+        y_values = np.asarray([point[1] for point in finite_points], dtype=float)
+        lower_cutoff = float(np.median(y_values))
+        lower_points = [point for point in finite_points if point[1] <= lower_cutoff]
+        if len(lower_points) < min_points:
+            lower_points = finite_points
+    else:
         lower_points = finite_points
 
     safe_bin_size = bin_size_m if math.isfinite(bin_size_m) and bin_size_m > 0.0 else LIDAR_WALL_BIN_SIZE_M
@@ -907,6 +930,10 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._nav2point_map_pick_mode_enabled = False
         self._measurement_start_world_position: tuple[float, float] | None = None
         self._measurement_end_world_position: tuple[float, float] | None = None
+        self._lidar_measurement_area: LidarMeasurementArea | None = None
+        self._lidar_measurement_area_edit_enabled = False
+        self._lidar_measurement_area_drag_start_world: tuple[float, float] | None = None
+        self._lidar_measurement_area_drag_current_world: tuple[float, float] | None = None
         self._manual_drive_lock = threading.Lock()
         self._pending_nav2point_world_position: tuple[float, float] | None = None
         self._pending_nav2point_yaw_radians = 0.0
@@ -962,6 +989,13 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         ctk.CTkLabel(rx_position_controls, text="°").grid(
             row=1, column=3, padx=(0, 10), pady=(6, 0), sticky="w"
         )
+        self.lidar_measurement_area_btn = ctk.CTkButton(
+            rx_position_controls,
+            text="Messbereich",
+            command=self._toggle_lidar_measurement_area_edit_mode,
+            width=110,
+        )
+        self.lidar_measurement_area_btn.grid(row=2, column=0, padx=(0, 4), pady=(6, 0), sticky="w")
         ctk.CTkLabel(rx_position_controls, text="Linienstärke cm").grid(
             row=1, column=4, padx=(0, 4), pady=(6, 0), sticky="w"
         )
@@ -1393,6 +1427,14 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._draw_map_preview()
 
     def _on_map_canvas_click(self, event: tk.Event) -> None:
+        if getattr(self, "_lidar_measurement_area_edit_enabled", False):
+            world_position = self._preview_pixel_to_world(preview_x=float(event.x), preview_y=float(event.y))
+            if world_position is None:
+                return
+            self._lidar_measurement_area_drag_start_world = world_position
+            self._lidar_measurement_area_drag_current_world = world_position
+            self._draw_map_preview()
+            return
         if getattr(self, "_nav2point_map_pick_mode_enabled", False):
             world_position = self._preview_pixel_to_world(preview_x=float(event.x), preview_y=float(event.y))
             if world_position is None:
@@ -1436,6 +1478,15 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         )
 
     def _on_map_canvas_drag(self, event: tk.Event) -> None:
+        if getattr(self, "_lidar_measurement_area_edit_enabled", False):
+            if self._lidar_measurement_area_drag_start_world is None:
+                return
+            world_position = self._preview_pixel_to_world(preview_x=float(event.x), preview_y=float(event.y))
+            if world_position is None:
+                return
+            self._lidar_measurement_area_drag_current_world = world_position
+            self._draw_map_preview()
+            return
         if getattr(self, "_nav2point_map_pick_mode_enabled", False):
             if self._pending_nav2point_world_position is None or self._nav2point_drag_start_preview is None:
                 return
@@ -1462,6 +1513,23 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._draw_map_preview()
 
     def _on_map_canvas_release(self, _event: tk.Event) -> None:
+        if getattr(self, "_lidar_measurement_area_edit_enabled", False):
+            start = self._lidar_measurement_area_drag_start_world
+            current = self._lidar_measurement_area_drag_current_world
+            self._lidar_measurement_area_drag_start_world = None
+            self._lidar_measurement_area_drag_current_world = None
+            if start is None or current is None:
+                return
+            area = self._normalize_lidar_measurement_area(start, current)
+            if area is None:
+                self._draw_map_preview()
+                return
+            self._set_lidar_measurement_area(area)
+            self._append_validation(
+                "✅ LiDAR-Messbereich gesetzt: "
+                f"x={area.min_x:.3f}…{area.max_x:.3f}, y={area.min_y:.3f}…{area.max_y:.3f}"
+            )
+            return
         if getattr(self, "_nav2point_map_pick_mode_enabled", False):
             world_position = self._pending_nav2point_world_position
             if world_position is None:
@@ -1558,6 +1626,12 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             self._set_waypoint_map_pick_mode(False)
             self._set_measurement_map_pick_mode(False)
             self._set_nav2point_map_pick_mode(False)
+            self._lidar_measurement_area_edit_enabled = False
+            self._lidar_measurement_area_drag_start_world = None
+            self._lidar_measurement_area_drag_current_world = None
+            lidar_area_button = getattr(self, "lidar_measurement_area_btn", None)
+            if lidar_area_button is not None:
+                lidar_area_button.configure(text="Messbereich")
         button_text = "✕" if enabled else "🖱️"
         self.rx_antenna_map_pick_mode_btn.configure(text=button_text)
         self._update_map_canvas_cursor()
@@ -1580,6 +1654,12 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             nav2point_button = getattr(self, "nav2point_map_pick_mode_btn", None)
             if nav2point_button is not None:
                 nav2point_button.configure(text="nav2point")
+            self._lidar_measurement_area_edit_enabled = False
+            self._lidar_measurement_area_drag_start_world = None
+            self._lidar_measurement_area_drag_current_world = None
+            lidar_area_button = getattr(self, "lidar_measurement_area_btn", None)
+            if lidar_area_button is not None:
+                lidar_area_button.configure(text="Messbereich")
         else:
             self._clear_pending_waypoint_marker()
         self.waypoint_map_pick_mode_btn.configure(text="✕" if enabled else "🖱️")
@@ -1589,12 +1669,139 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
     def _toggle_waypoint_map_pick_mode(self) -> None:
         self._set_waypoint_map_pick_mode(not self._waypoint_map_pick_mode_enabled)
 
+    def _set_lidar_measurement_area_edit_mode(self, enabled: bool) -> None:
+        self._lidar_measurement_area_edit_enabled = enabled
+        self._lidar_measurement_area_drag_start_world = None
+        self._lidar_measurement_area_drag_current_world = None
+        if enabled:
+            self._set_waypoint_map_pick_mode(False)
+            self._set_rx_antenna_map_pick_mode(False)
+            self._set_measurement_map_pick_mode(False)
+            self._set_nav2point_map_pick_mode(False)
+            self._lidar_measurement_area_edit_enabled = True
+        button = getattr(self, "lidar_measurement_area_btn", None)
+        if button is not None:
+            button.configure(text="✕" if enabled else "Messbereich")
+        self._update_map_canvas_cursor()
+        self._draw_map_preview()
+
+    def _toggle_lidar_measurement_area_edit_mode(self) -> None:
+        self._set_lidar_measurement_area_edit_mode(
+            not getattr(self, "_lidar_measurement_area_edit_enabled", False)
+        )
+
+    @staticmethod
+    def _normalize_lidar_measurement_area(
+        first: tuple[float, float],
+        second: tuple[float, float],
+    ) -> LidarMeasurementArea | None:
+        min_x = min(float(first[0]), float(second[0]))
+        max_x = max(float(first[0]), float(second[0]))
+        min_y = min(float(first[1]), float(second[1]))
+        max_y = max(float(first[1]), float(second[1]))
+        if not all(math.isfinite(value) for value in (min_x, min_y, max_x, max_y)):
+            return None
+        if abs(max_x - min_x) < 1e-6 or abs(max_y - min_y) < 1e-6:
+            return None
+        return LidarMeasurementArea(min_x=min_x, min_y=min_y, max_x=max_x, max_y=max_y)
+
+    def _current_lidar_measurement_area_for_display(self) -> LidarMeasurementArea | None:
+        drag_start = getattr(self, "_lidar_measurement_area_drag_start_world", None)
+        drag_current = getattr(self, "_lidar_measurement_area_drag_current_world", None)
+        if drag_start is not None and drag_current is not None:
+            drag_area = self._normalize_lidar_measurement_area(drag_start, drag_current)
+            if drag_area is not None:
+                return drag_area
+        return getattr(self, "_lidar_measurement_area", None)
+
+    def _set_lidar_measurement_area(self, area: LidarMeasurementArea, *, persist: bool = True) -> None:
+        self._lidar_measurement_area = area
+        self._static_map_layer_signature = None
+        self._draw_map_preview()
+        if persist:
+            self._persist_workflow_state()
+
+    def _serialize_lidar_measurement_area(self) -> dict[str, float] | None:
+        area = getattr(self, "_lidar_measurement_area", None)
+        if area is None:
+            return None
+        return {"min_x": area.min_x, "min_y": area.min_y, "max_x": area.max_x, "max_y": area.max_y}
+
+    @staticmethod
+    def _parse_lidar_measurement_area(payload: Any) -> LidarMeasurementArea | None:
+        if not isinstance(payload, dict):
+            return None
+        try:
+            values = (
+                float(payload.get("min_x")),
+                float(payload.get("min_y")),
+                float(payload.get("max_x")),
+                float(payload.get("max_y")),
+            )
+        except (TypeError, ValueError):
+            return None
+        min_x, min_y, max_x, max_y = values
+        if not all(math.isfinite(value) for value in values):
+            return None
+        if min_x > max_x:
+            min_x, max_x = max_x, min_x
+        if min_y > max_y:
+            min_y, max_y = max_y, min_y
+        if abs(max_x - min_x) < 1e-6 or abs(max_y - min_y) < 1e-6:
+            return None
+        return LidarMeasurementArea(min_x=min_x, min_y=min_y, max_x=max_x, max_y=max_y)
+
+    def _draw_lidar_measurement_area_overlay(self) -> None:
+        if not getattr(self, "_lidar_measurement_area_edit_enabled", False):
+            return
+        area = self._current_lidar_measurement_area_for_display()
+        original = self._map_image_original
+        if area is None or original is None:
+            return
+        lower_left = self._world_to_map_pixel(x=area.min_x, y=area.min_y, image_height=original.height())
+        upper_right = self._world_to_map_pixel(x=area.max_x, y=area.max_y, image_height=original.height())
+        if lower_left is None or upper_right is None:
+            return
+        scale_x, scale_y = getattr(self, "_map_preview_scale", (1.0, 1.0))
+        offset_x, offset_y = self._map_preview_offset
+        x1 = lower_left[0] * scale_x + offset_x
+        y1 = lower_left[1] * scale_y + offset_y
+        x2 = upper_right[0] * scale_x + offset_x
+        y2 = upper_right[1] * scale_y + offset_y
+        left, right = sorted((x1, x2))
+        top, bottom = sorted((y1, y2))
+        self.map_preview_canvas.create_rectangle(
+            left,
+            top,
+            right,
+            bottom,
+            fill="#1e88e5",
+            stipple="gray25",
+            outline="#90caf9",
+            width=2,
+            dash=(5, 3),
+        )
+        self.map_preview_canvas.create_text(
+            left + 6,
+            top + 6,
+            text="Messbereich",
+            anchor="nw",
+            fill="#e3f2fd",
+            font=("TkDefaultFont", 10, "bold"),
+        )
+
     def _set_measurement_map_pick_mode(self, enabled: bool) -> None:
         self._measurement_map_pick_mode_enabled = enabled
         if enabled:
             self._set_waypoint_map_pick_mode(False)
             self._set_rx_antenna_map_pick_mode(False)
             self._set_nav2point_map_pick_mode(False)
+            self._lidar_measurement_area_edit_enabled = False
+            self._lidar_measurement_area_drag_start_world = None
+            self._lidar_measurement_area_drag_current_world = None
+            lidar_area_button = getattr(self, "lidar_measurement_area_btn", None)
+            if lidar_area_button is not None:
+                lidar_area_button.configure(text="Messbereich")
         else:
             self._measurement_start_world_position = None
             self._measurement_end_world_position = None
@@ -1613,6 +1820,12 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             self._set_waypoint_map_pick_mode(False)
             self._set_rx_antenna_map_pick_mode(False)
             self._set_measurement_map_pick_mode(False)
+            self._lidar_measurement_area_edit_enabled = False
+            self._lidar_measurement_area_drag_start_world = None
+            self._lidar_measurement_area_drag_current_world = None
+            lidar_area_button = getattr(self, "lidar_measurement_area_btn", None)
+            if lidar_area_button is not None:
+                lidar_area_button.configure(text="Messbereich")
         else:
             self._clear_pending_nav2point_marker()
         nav2point_button = getattr(self, "nav2point_map_pick_mode_btn", None)
@@ -1738,6 +1951,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             or self._waypoint_map_pick_mode_enabled
             or getattr(self, "_measurement_map_pick_mode_enabled", False)
             or getattr(self, "_nav2point_map_pick_mode_enabled", False)
+            or getattr(self, "_lidar_measurement_area_edit_enabled", False)
         )
         self.map_preview_canvas.configure(cursor="crosshair" if pick_mode_active else "")
 
@@ -1861,6 +2075,10 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             self._rx_antenna_global_position,
             self._measurement_start_world_position,
             self._measurement_end_world_position,
+            getattr(self, "_lidar_measurement_area", None),
+            getattr(self, "_lidar_measurement_area_edit_enabled", False),
+            getattr(self, "_lidar_measurement_area_drag_start_world", None),
+            getattr(self, "_lidar_measurement_area_drag_current_world", None),
             self._echo_heatmap_imaginary_line_width_cm(),
             self._echo_heatmap_min_visible_overlap(),
             self._echo_heatmap_evaluation_visible(),
@@ -1904,6 +2122,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._last_visible_red_echo_probability_world_points = []
         self._draw_selected_echo_overlay()
         self._draw_selected_lidar_reference_overlay()
+        self._draw_lidar_measurement_area_overlay()
         self._raise_selected_echo_probability_overlay()
         self._sync_echo_heatmap_settings_overlay(visible=True)
 
@@ -3403,7 +3622,10 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             if lidar_reference_line_visible:
                 wall_points.extend(self._lidar_scan_world_points_for_point(point=overlay_point, scan=scan))
         if lidar_reference_line_visible:
-            estimate = _estimate_lower_horizontal_lidar_wall(wall_points)
+            estimate = _estimate_lower_horizontal_lidar_wall(
+                wall_points,
+                measurement_area=getattr(self, "_lidar_measurement_area", None),
+            )
             if estimate is not None:
                 self._draw_lidar_wall_estimate(estimate)
 
@@ -4275,6 +4497,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             ),
             "map_config_file": self._selected_map_config_file,
             "rx_antenna_global_position": self._serialize_rx_antenna_global_position(),
+            "lidar_measurement_area": self._serialize_lidar_measurement_area(),
             "lidar_reference_enabled": bool(self.lidar_reference_enabled_var.get()),
             "manual_review_enabled": bool(self.manual_review_enabled_var.get()),
             "test_run_enabled": bool(self.test_run_enabled_var.get()),
@@ -4366,6 +4589,9 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 self._clear_rx_antenna_position(persist=False)
             else:
                 self._set_rx_antenna_position(x=rx_position[0], y=rx_position[1], persist=False)
+            self._lidar_measurement_area = self._parse_lidar_measurement_area(
+                payload.get("lidar_measurement_area")
+            )
             self.lidar_reference_enabled_var.set(bool(payload.get("lidar_reference_enabled", True)))
             self.manual_review_enabled_var.set(bool(payload.get("manual_review_enabled", True)))
             self.test_run_enabled_var.set(bool(payload.get("test_run_enabled", False)))
