@@ -2006,6 +2006,49 @@ def test_on_map_canvas_drag_updates_pending_nav2point_yaw() -> None:
     assert window._pending_nav2point_yaw_radians == 0.0
 
 
+def test_lidar_measurement_area_button_uses_checkmark_when_active() -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    configured: list[str] = []
+    window.lidar_measurement_area_btn = SimpleNamespace(
+        configure=lambda **kwargs: configured.append(kwargs["text"])
+    )
+    window._set_waypoint_map_pick_mode = lambda _enabled: None
+    window._set_rx_antenna_map_pick_mode = lambda _enabled: None
+    window._set_measurement_map_pick_mode = lambda _enabled: None
+    window._set_nav2point_map_pick_mode = lambda _enabled: None
+    window._update_map_canvas_cursor = lambda: None
+    window._draw_map_preview = lambda: None
+
+    window._set_lidar_measurement_area_edit_mode(True)
+
+    assert configured == ["✓"]
+
+
+def test_lidar_measurement_area_click_without_drag_clears_area() -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    window._lidar_measurement_area_edit_enabled = True
+    window._lidar_measurement_area = LidarMeasurementArea(min_x=0.0, min_y=1.0, max_x=2.0, max_y=3.0)
+    window._lidar_measurement_area_drag_start_world = (1.0, 2.0)
+    window._lidar_measurement_area_drag_current_world = (1.0, 2.0)
+    window._static_map_layer_signature = object()
+    draw_calls: list[str] = []
+    persist_calls: list[str] = []
+    messages: list[str] = []
+    window._draw_map_preview = lambda: draw_calls.append("draw")
+    window._persist_workflow_state = lambda: persist_calls.append("persist")
+    window._append_validation = messages.append
+
+    window._on_map_canvas_release(SimpleNamespace(x=10, y=20))
+
+    assert window._lidar_measurement_area is None
+    assert window._lidar_measurement_area_drag_start_world is None
+    assert window._lidar_measurement_area_drag_current_world is None
+    assert window._static_map_layer_signature is None
+    assert draw_calls == ["draw"]
+    assert persist_calls == ["persist"]
+    assert messages == ["✅ LiDAR-Messwand entfernt."]
+
+
 def test_on_map_canvas_release_creates_waypoint_and_disables_pick_mode() -> None:
     window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
     window._waypoint_map_pick_mode_enabled = True
