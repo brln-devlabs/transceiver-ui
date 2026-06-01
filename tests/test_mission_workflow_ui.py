@@ -2411,7 +2411,7 @@ def test_set_measurement_map_pick_mode_clears_overlay_when_disabled() -> None:
     assert window._measurement_map_pick_mode_enabled is False
     assert window._measurement_start_world_position is None
     assert window._measurement_end_world_position is None
-    assert window.measurement_map_pick_mode_btn.text == "measurement"
+    assert window.measurement_map_pick_mode_btn.text == "ruler"
 
 
 def test_manual_measurement_point_context_prefers_selected_enabled_point() -> None:
