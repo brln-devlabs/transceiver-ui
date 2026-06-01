@@ -70,6 +70,29 @@ def test_estimate_lidar_reference_wall_uses_measurement_area() -> None:
     assert estimate.intercept == pytest.approx(3.0, abs=0.03)
 
 
+
+
+def test_estimate_lidar_reference_wall_uses_polygon_measurement_area() -> None:
+    inside_wall = [(x / 10.0, 2.0 + (0.01 if x % 2 else -0.01)) for x in range(0, 31)]
+    outside_same_bbox = [(0.2, 0.2), (1.0, 0.4), (1.5, 0.7), (2.0, 0.6), (2.8, 0.2)]
+    polygon_area = LidarMeasurementArea(
+        min_x=0.0,
+        min_y=0.0,
+        max_x=3.0,
+        max_y=2.3,
+        vertices=((0.0, 1.5), (3.0, 1.5), (3.0, 2.3), (0.0, 2.3)),
+    )
+
+    estimate = _estimate_lidar_reference_wall(
+        inside_wall + outside_same_bbox,
+        measurement_area=polygon_area,
+    )
+
+    assert estimate is not None
+    assert estimate.point_count == len(inside_wall)
+    assert abs(estimate.intercept - 2.0) < 0.02
+
+
 def test_estimate_lidar_reference_wall_rejects_measurement_area_with_too_few_points() -> None:
     lower_wall = [(x / 10.0, 1.0) for x in range(0, 31)]
     measurement_area = LidarMeasurementArea(min_x=0.0, min_y=2.0, max_x=1.0, max_y=3.0)
@@ -2039,12 +2062,13 @@ def test_lidar_measurement_area_button_uses_checkmark_when_active() -> None:
     assert configured == ["✓"]
 
 
-def test_lidar_measurement_area_click_without_drag_clears_area() -> None:
+def test_lidar_measurement_area_right_click_clears_area_and_draft() -> None:
     window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
     window._lidar_measurement_area_edit_enabled = True
     window._lidar_measurement_area = LidarMeasurementArea(min_x=0.0, min_y=1.0, max_x=2.0, max_y=3.0)
     window._lidar_measurement_area_drag_start_world = (1.0, 2.0)
-    window._lidar_measurement_area_drag_current_world = (1.0, 2.0)
+    window._lidar_measurement_area_drag_current_world = (1.5, 2.5)
+    window._lidar_measurement_area_draft_vertices = [(1.0, 2.0), (1.5, 2.5)]
     window._static_map_layer_signature = object()
     draw_calls: list[str] = []
     persist_calls: list[str] = []
@@ -2053,15 +2077,45 @@ def test_lidar_measurement_area_click_without_drag_clears_area() -> None:
     window._persist_workflow_state = lambda: persist_calls.append("persist")
     window._append_validation = messages.append
 
-    window._on_map_canvas_release(SimpleNamespace(x=10, y=20))
+    window._on_map_canvas_right_click(SimpleNamespace(x=10, y=20))
 
     assert window._lidar_measurement_area is None
+    assert window._lidar_measurement_area_draft_vertices == []
     assert window._lidar_measurement_area_drag_start_world is None
     assert window._lidar_measurement_area_drag_current_world is None
     assert window._static_map_layer_signature is None
     assert draw_calls == ["draw"]
     assert persist_calls == ["persist"]
     assert messages == ["✅ LiDAR-Messwand entfernt."]
+
+
+def test_lidar_measurement_area_line_tool_closes_polygon_on_start_click() -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    window._lidar_measurement_area_edit_enabled = True
+    window._lidar_measurement_area_draft_vertices = []
+    window._lidar_measurement_area = None
+    window._static_map_layer_signature = object()
+    window._map_image_original = SimpleNamespace(height=lambda: 100, width=lambda: 100)
+    window._map_preview_scale = (1.0, 1.0)
+    window._map_preview_offset = (0.0, 0.0)
+    window._preview_pixel_to_world = lambda *, preview_x, preview_y: (preview_x, preview_y)
+    window._world_to_map_pixel = lambda *, x, y, image_height: (x, y)
+    draw_calls: list[str] = []
+    persist_calls: list[str] = []
+    messages: list[str] = []
+    window._draw_map_preview = lambda: draw_calls.append("draw")
+    window._persist_workflow_state = lambda: persist_calls.append("persist")
+    window._append_validation = messages.append
+
+    for x, y in ((0, 0), (4, 0), (4, 3), (0, 0)):
+        window._on_map_canvas_click(SimpleNamespace(x=x, y=y))
+
+    assert window._lidar_measurement_area is not None
+    assert window._lidar_measurement_area.vertices == ((0.0, 0.0), (4.0, 0.0), (4.0, 3.0))
+    assert window._lidar_measurement_area_draft_vertices == []
+    assert persist_calls == ["persist"]
+    assert messages == ["✅ LiDAR-Messwand gesetzt: 3 Punkte, x=0.000…4.000, y=0.000…3.000"]
+    assert len(draw_calls) == 4
 
 
 def test_on_map_canvas_release_creates_waypoint_and_disables_pick_mode() -> None:
