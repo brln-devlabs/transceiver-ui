@@ -2122,6 +2122,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._last_visible_red_echo_probability_world_points = []
         self._draw_selected_echo_overlay()
         self._draw_selected_lidar_reference_overlay()
+        self._draw_selected_measurement_position_markers()
         self._draw_lidar_measurement_area_overlay()
         self._raise_selected_echo_probability_overlay()
         self._sync_echo_heatmap_settings_overlay(visible=True)
@@ -3588,6 +3589,44 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._ellipse_unit_circle_cache[samples] = points
         return points
 
+    def _draw_selected_measurement_position_markers(self) -> None:
+        original = self._map_image_original
+        if original is None:
+            return
+        scale_x, scale_y = getattr(self, "_map_preview_scale", (1.0, 1.0))
+        offset_x, offset_y = self._map_preview_offset
+        if not hasattr(self, "_selected_result_index") or not hasattr(self, "_records"):
+            return
+        for record in self._selected_record_payloads():
+            measurement_position = self._selected_record_measurement_position(record)
+            if measurement_position is None:
+                continue
+            map_pixel = self._world_to_map_pixel(
+                x=measurement_position[0],
+                y=measurement_position[1],
+                image_height=original.height(),
+            )
+            if map_pixel is None:
+                continue
+            if not self._is_pixel_inside_map(
+                map_pixel[0],
+                map_pixel[1],
+                width=original.width(),
+                height=original.height(),
+            ):
+                continue
+            marker_x = map_pixel[0] * scale_x + offset_x
+            marker_y = map_pixel[1] * scale_y + offset_y
+            self.map_preview_canvas.create_oval(
+                marker_x - 5,
+                marker_y - 5,
+                marker_x + 5,
+                marker_y + 5,
+                fill="#212121",
+                outline="#ffffff",
+                width=2,
+            )
+
     def _draw_selected_lidar_reference_overlay(self) -> None:
         lidar_points_visible = self._echo_heatmap_lidar_points_visible()
         lidar_reference_line_visible = self._echo_heatmap_lidar_reference_line_visible()
@@ -3845,15 +3884,6 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         start_y = start_map_pixel[1] * scale_y + offset_y
         preview_scale = max(scale_x, scale_y)
         lidar_hit_marker_radius = max(2.0, min(4.0, 2.5 * max(1.0, preview_scale)))
-        self.map_preview_canvas.create_oval(
-            start_x - 5,
-            start_y - 5,
-            start_x + 5,
-            start_y + 5,
-            fill="#212121",
-            outline="#ffffff",
-            width=2,
-        )
         angle_min = float(scan["angle_min"])
         angle_increment = float(scan["angle_increment"])
         ranges = scan["ranges"]
