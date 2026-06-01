@@ -2088,6 +2088,44 @@ def test_lidar_measurement_area_button_uses_checkmark_when_active() -> None:
     assert configured == ["✓"]
 
 
+def test_draw_lidar_measurement_area_overlay_uses_dark_blue_label() -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    text_calls: list[dict[str, object]] = []
+
+    class CanvasStub:
+        def create_polygon(self, *args, **kwargs):
+            return None
+
+        def create_text(self, *args, **kwargs):
+            text_calls.append(kwargs)
+            return None
+
+    window._lidar_measurement_area_edit_enabled = True
+    window._map_image_original = SimpleNamespace(height=lambda: 100)
+    window._map_preview_scale = (1.0, 1.0)
+    window._map_preview_offset = (0.0, 0.0)
+    window._lidar_measurement_area_draft_vertices = []
+    window._lidar_measurement_area = LidarMeasurementArea(
+        min_x=0.0,
+        min_y=0.0,
+        max_x=4.0,
+        max_y=3.0,
+    )
+    window._world_to_map_pixel = lambda *, x, y, image_height: (x, y)
+    window.map_preview_canvas = CanvasStub()
+
+    window._draw_lidar_measurement_area_overlay()
+
+    assert text_calls == [
+        {
+            "text": "Messwand",
+            "anchor": "nw",
+            "fill": "#0D47A1",
+            "font": ("TkDefaultFont", 10, "bold"),
+        }
+    ]
+
+
 def test_lidar_measurement_area_right_click_clears_area_and_draft() -> None:
     window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
     window._lidar_measurement_area_edit_enabled = True

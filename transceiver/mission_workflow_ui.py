@@ -64,6 +64,7 @@ LIDAR_OVERLAY_SCANNER_YAW_OFFSET_RAD = math.pi / 2.0
 LIDAR_WALL_MIN_POINTS = 8
 LIDAR_WALL_LINE_COLOR = "#1E88E5"
 LIDAR_WALL_LINE_WIDTH_PX = 3
+LIDAR_MEASUREMENT_AREA_LABEL_COLOR = "#0D47A1"
 MEASUREMENT_START_LIVE_POSITION_WAIT_TIMEOUT_S = 1.6
 MEASUREMENT_START_LIVE_POSITION_WAIT_INTERVAL_S = 0.1
 LIVE_ECHO_CACHE_POSITION_DELTA_M = 0.015
@@ -1956,7 +1957,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             top + 6,
             text="Messwand",
             anchor="nw",
-            fill="#e3f2fd",
+            fill=LIDAR_MEASUREMENT_AREA_LABEL_COLOR,
             font=("TkDefaultFont", 10, "bold"),
         )
 
