@@ -782,8 +782,14 @@ class _TreeviewSelectionStub:
     def selection(self) -> tuple[str, ...]:
         return self._selected
 
-    def selection_set(self, item_id: str) -> None:
-        self._selected = (item_id,)
+    def selection_set(self, *item_ids: str) -> None:
+        self._selected = tuple(item_ids)
+
+    def selection_add(self, *item_ids: str) -> None:
+        self._selected = tuple(dict.fromkeys((*self._selected, *item_ids)))
+
+    def focus(self, _item_id: str) -> None:
+        return None
 
     def selection_remove(self, *item_ids: str) -> None:
         self._selected = tuple(selected for selected in self._selected if selected not in item_ids)
@@ -937,12 +943,55 @@ def test_on_results_table_click_ignores_table_chrome_without_clearing_selection(
     assert window._selected_result_index == 0
 
 
+def test_on_results_table_control_click_adds_unselected_row_to_multiselect() -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    table = _TreeviewSelectionStub()
+    table._selected = ("row-a",)
+    table._indices = {"row-a": 0, "row-b": 1, "row-c": 2}
+    table._row_id = "row-c"
+    window.results_table = table
+    window.results_selection_diagnostics_var = _StringVarStub()
+    draw_calls: list[str] = []
+    window._draw_map_preview = lambda: draw_calls.append("draw")
+
+    result = window._on_results_table_control_click(SimpleNamespace(x=5, y=5))
+
+    assert result == "break"
+    assert table.selection() == ("row-a", "row-c")
+    assert window._selected_result_indices == (0, 2)
+    assert window._selected_result_index == 0
+    assert window.results_selection_diagnostics_var.value == "Auswahl: 2 Zeilen"
+    assert draw_calls == ["draw"]
+
+
+def test_on_results_table_control_click_removes_selected_row_from_multiselect() -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    table = _TreeviewSelectionStub()
+    table._selected = ("row-a", "row-b")
+    table._indices = {"row-a": 0, "row-b": 1, "row-c": 2}
+    table._row_id = "row-a"
+    window.results_table = table
+    window.results_selection_diagnostics_var = _StringVarStub()
+    draw_calls: list[str] = []
+    window._draw_map_preview = lambda: draw_calls.append("draw")
+
+    result = window._on_results_table_control_click(SimpleNamespace(x=5, y=5))
+
+    assert result == "break"
+    assert table.selection() == ("row-b",)
+    assert window._selected_result_indices == (1,)
+    assert window._selected_result_index == 1
+    assert window.results_selection_diagnostics_var.value == "Auswahl: 1 Zeilen"
+    assert draw_calls == ["draw"]
+
+
 class _ResultsContextMenuStub:
     def __init__(self) -> None:
         self.labels: list[str] = []
         self.states: list[str | None] = []
         self.popup_calls: list[tuple[int, int]] = []
         self.release_count = 0
+        self.unpost_count = 0
 
     def entryconfigure(self, _index: int, *, label: str, state: str | None = None) -> None:
         self.labels.append(label)
@@ -953,6 +1002,32 @@ class _ResultsContextMenuStub:
 
     def grab_release(self) -> None:
         self.release_count += 1
+
+    def unpost(self) -> None:
+        self.unpost_count += 1
+
+
+def test_dismiss_results_context_menu_unposts_menu_and_removes_bindings() -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    menu = _ResultsContextMenuStub()
+    unbound: list[tuple[str, str]] = []
+
+    class _WidgetStub:
+        def unbind(self, sequence: str, binding_id: str) -> None:
+            unbound.append((sequence, binding_id))
+
+    widget = _WidgetStub()
+    window.results_table_context_menu = menu
+    window._results_context_menu_dismiss_bindings = (
+        (widget, "<ButtonPress-1>", "bind-1"),
+        (widget, "<KeyPress-Escape>", "bind-2"),
+    )
+
+    window._dismiss_results_context_menu(SimpleNamespace())
+
+    assert menu.unpost_count == 1
+    assert window._results_context_menu_dismiss_bindings == ()
+    assert unbound == [("<ButtonPress-1>", "bind-1"), ("<KeyPress-Escape>", "bind-2")]
 
 
 def test_on_results_table_context_menu_keeps_existing_multiselect_for_selected_row() -> None:
