@@ -3756,12 +3756,12 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         return world_points
 
     @staticmethod
-    def _line_residual_std_and_rms_m(
+    def _line_residual_std_m(
         points: list[tuple[float, float]],
         *,
         slope: float,
         intercept: float,
-    ) -> tuple[float, float] | None:
+    ) -> float | None:
         finite_points = [
             (float(x), float(y))
             for x, y in points
@@ -3775,9 +3775,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         finite_residuals = residuals[np.isfinite(residuals)]
         if finite_residuals.size == 0:
             return None
-        residual_std_m = float(np.std(finite_residuals))
-        residual_rms_m = float(math.sqrt(np.mean(finite_residuals * finite_residuals)))
-        return (residual_std_m, residual_rms_m)
+        return float(np.std(finite_residuals))
 
     def _draw_lidar_wall_estimate(self, estimate: LidarWallEstimate) -> None:
         original = self._map_image_original
@@ -3810,17 +3808,15 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             width=LIDAR_WALL_LINE_WIDTH_PX,
         )
         red_points = getattr(self, "_last_visible_red_echo_probability_world_points", [])
-        red_points_stats_m = self._line_residual_std_and_rms_m(
+        red_points_std_m = self._line_residual_std_m(
             red_points,
             slope=estimate.slope,
             intercept=estimate.intercept,
         )
         red_points_summary = ""
-        if red_points_stats_m is not None:
-            red_points_std_m, red_points_rms_m = red_points_stats_m
+        if red_points_std_m is not None:
             red_points_summary = (
-                f", σ sichtbare rote Punkte={red_points_std_m * 100.0:.1f}cm, "
-                f"RMS sichtbare rote Punkte={red_points_rms_m * 100.0:.1f}cm "
+                f", σ sichtbare rote Punkte={red_points_std_m * 100.0:.1f}cm "
                 f"({len(red_points)} Punkte)"
             )
         self._append_validation(
@@ -3828,8 +3824,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             f"{estimate.point_count} Punkte, "
             f"y={estimate.slope:.4f}x+{estimate.intercept:.3f}, "
             f"σ={estimate.residual_std_m * 100.0:.1f}cm, "
-            f"mittl. |Abweichung|={estimate.residual_mean_m * 100.0:.1f}cm, "
-            f"RMS={estimate.residual_rms_m * 100.0:.1f}cm"
+            f"mittl. |Abweichung|={estimate.residual_mean_m * 100.0:.1f}cm"
             f"{red_points_summary}"
         )
 
