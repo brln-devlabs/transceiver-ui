@@ -684,6 +684,35 @@ def test_draw_selected_lidar_reference_overlay_can_hide_all_lidar_layers() -> No
     window._draw_selected_lidar_reference_overlay()
 
 
+def test_draw_selected_measurement_position_markers_ignore_lidar_points_toggle() -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    window._map_image_original = SimpleNamespace(width=lambda: 200, height=lambda: 120)
+    window._map_preview_scale = (1.0, 1.0)
+    window._map_preview_offset = (0.0, 0.0)
+    window._selected_result_index = 0
+    window._selected_result_indices = (0,)
+    window._records = [
+        {
+            "point_index": 0,
+            "live_position_at_measurement": {"x": 7.0, "y": -2.0, "yaw": 0.25},
+        }
+    ]
+    window._world_to_map_pixel = lambda *, x, y, image_height: (x, y)
+    window._is_pixel_inside_map = lambda *_args, **_kwargs: True
+    marker_calls: list[tuple[tuple[float, ...], dict[str, object]]] = []
+    window.map_preview_canvas = SimpleNamespace(
+        create_oval=lambda *coords, **kwargs: marker_calls.append((coords, kwargs)) or 1
+    )
+    window.echo_heatmap_lidar_points_visible_var = SimpleNamespace(get=lambda: False)
+
+    window._draw_selected_measurement_position_markers()
+
+    assert len(marker_calls) == 1
+    coords, kwargs = marker_calls[0]
+    assert coords == pytest.approx((2.0, -7.0, 12.0, 3.0))
+    assert kwargs["fill"] == "#212121"
+
+
 
 def test_draw_lidar_wall_estimate_reports_visible_red_point_std_deviation_and_rms() -> None:
     class FakeCanvas:
