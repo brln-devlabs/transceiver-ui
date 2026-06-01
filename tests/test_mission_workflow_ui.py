@@ -534,6 +534,8 @@ def test_workflow_state_payload_persists_echo_heatmap_settings() -> None:
     window.echo_heatmap_min_visible_overlap_var = SimpleNamespace(get=lambda: "7")
     window.echo_heatmap_evaluation_visible_var = SimpleNamespace(get=lambda: False)
     window.echo_heatmap_ellipses_visible_var = SimpleNamespace(get=lambda: True)
+    window.echo_heatmap_lidar_points_visible_var = SimpleNamespace(get=lambda: False)
+    window.echo_heatmap_lidar_reference_line_visible_var = SimpleNamespace(get=lambda: True)
     window._records = []
 
     payload = window._build_workflow_state_payload()
@@ -542,6 +544,8 @@ def test_workflow_state_payload_persists_echo_heatmap_settings() -> None:
     assert payload["echo_heatmap_min_visible_overlap"] == 7
     assert payload["echo_heatmap_evaluation_visible"] is False
     assert payload["echo_heatmap_ellipses_visible"] is True
+    assert payload["echo_heatmap_lidar_points_visible"] is False
+    assert payload["echo_heatmap_lidar_reference_line_visible"] is True
 
 
 def test_selected_record_overlay_point_prefers_live_yaw() -> None:
@@ -616,6 +620,44 @@ def test_draw_selected_lidar_reference_overlay_draws_multiple_selected_results()
         (7.0, -2.0),
         (8.0, -1.0),
     ]
+
+
+def test_draw_selected_lidar_reference_overlay_respects_lidar_visibility_toggles() -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    window._selected_result_index = 0
+    window._selected_result_indices = (0, 1)
+    window._records = [
+        {
+            "point_index": 0,
+            "live_position_at_measurement": {"x": 7.0, "y": -2.0, "yaw": 0.25},
+            "measurement": {"result": {"lidar_reference": {"output_file": "scan.yaml"}}},
+        },
+    ]
+    window._mission_points = [MeasurementPoint(id="p0", name="P0", x=50.0, y=50.0, yaw=0.0)]
+    window.echo_heatmap_lidar_points_visible_var = SimpleNamespace(get=lambda: False)
+    window.echo_heatmap_lidar_reference_line_visible_var = SimpleNamespace(get=lambda: True)
+    window._load_lidar_scan_for_overlay = lambda _path: {"angle_min": 0.0, "angle_increment": 0.1, "ranges": [1.0]}
+    scan_calls: list[dict[str, object]] = []
+    line_calls: list[LidarWallEstimate] = []
+    window._draw_lidar_scan_overlay_for_point = lambda **kwargs: scan_calls.append(kwargs)
+    window._lidar_scan_world_points_for_point = lambda **_kwargs: [
+        (x / 10.0, -1.0 + (0.005 if x % 2 else -0.005)) for x in range(0, 31)
+    ]
+    window._draw_lidar_wall_estimate = lambda estimate: line_calls.append(estimate)
+
+    window._draw_selected_lidar_reference_overlay()
+
+    assert scan_calls == []
+    assert len(line_calls) == 1
+
+
+def test_draw_selected_lidar_reference_overlay_can_hide_all_lidar_layers() -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    window.echo_heatmap_lidar_points_visible_var = SimpleNamespace(get=lambda: False)
+    window.echo_heatmap_lidar_reference_line_visible_var = SimpleNamespace(get=lambda: False)
+    window._selected_record_payloads = lambda: (_ for _ in ()).throw(AssertionError("records should not be read"))
+
+    window._draw_selected_lidar_reference_overlay()
 
 
 

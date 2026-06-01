@@ -553,6 +553,8 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         )
         self.echo_heatmap_evaluation_visible_var = tk.BooleanVar(value=True)
         self.echo_heatmap_ellipses_visible_var = tk.BooleanVar(value=False)
+        self.echo_heatmap_lidar_points_visible_var = tk.BooleanVar(value=True)
+        self.echo_heatmap_lidar_reference_line_visible_var = tk.BooleanVar(value=True)
         self._echo_heatmap_settings_trace_pending = False
         self._live_pose_stream_active = False
 
@@ -635,6 +637,18 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             return False
         return bool(variable.get())
 
+    def _echo_heatmap_lidar_points_visible(self) -> bool:
+        variable = getattr(self, "echo_heatmap_lidar_points_visible_var", None)
+        if variable is None:
+            return True
+        return bool(variable.get())
+
+    def _echo_heatmap_lidar_reference_line_visible(self) -> bool:
+        variable = getattr(self, "echo_heatmap_lidar_reference_line_visible_var", None)
+        if variable is None:
+            return True
+        return bool(variable.get())
+
     def _build_echo_heatmap_settings_overlay(self) -> tk.Frame:
         frame = tk.Frame(
             self.map_preview_canvas,
@@ -669,7 +683,21 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             variable=self.echo_heatmap_ellipses_visible_var,
             command=self._on_echo_heatmap_settings_changed,
             **checkbutton_kwargs,
-        ).grid(row=2, column=0, columnspan=2, sticky="ew", padx=8, pady=(0, 6))
+        ).grid(row=2, column=0, columnspan=2, sticky="ew", padx=8, pady=(0, 0))
+        tk.Checkbutton(
+            frame,
+            text="LiDAR-Messpunkte",
+            variable=self.echo_heatmap_lidar_points_visible_var,
+            command=self._on_echo_heatmap_settings_changed,
+            **checkbutton_kwargs,
+        ).grid(row=3, column=0, columnspan=2, sticky="ew", padx=8, pady=(0, 0))
+        tk.Checkbutton(
+            frame,
+            text="LiDAR-Referenzlinie",
+            variable=self.echo_heatmap_lidar_reference_line_visible_var,
+            command=self._on_echo_heatmap_settings_changed,
+            **checkbutton_kwargs,
+        ).grid(row=4, column=0, columnspan=2, sticky="ew", padx=8, pady=(0, 6))
         return frame
 
     def _sync_echo_heatmap_settings_overlay(self, *, visible: bool) -> None:
@@ -828,6 +856,12 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             "write", lambda *_args: self._on_echo_heatmap_settings_changed()
         )
         self.echo_heatmap_ellipses_visible_var.trace_add(
+            "write", lambda *_args: self._on_echo_heatmap_settings_changed()
+        )
+        self.echo_heatmap_lidar_points_visible_var.trace_add(
+            "write", lambda *_args: self._on_echo_heatmap_settings_changed()
+        )
+        self.echo_heatmap_lidar_reference_line_visible_var.trace_add(
             "write", lambda *_args: self._on_echo_heatmap_settings_changed()
         )
         self._map_image_original: tk.PhotoImage | None = None
@@ -1831,6 +1865,8 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             self._echo_heatmap_min_visible_overlap(),
             self._echo_heatmap_evaluation_visible(),
             self._echo_heatmap_ellipses_visible(),
+            self._echo_heatmap_lidar_points_visible(),
+            self._echo_heatmap_lidar_reference_line_visible(),
             self._pending_nav2point_world_position,
             self._pending_nav2point_yaw_radians,
             self._pending_waypoint_world_position,
@@ -1868,8 +1904,9 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._last_visible_red_echo_probability_world_points = []
         echo_heatmap_active = self._draw_selected_echo_overlay()
         self._draw_selected_lidar_reference_overlay()
+        settings_overlay_active = echo_heatmap_active or len(self._selected_record_payloads()) > 1
         self._raise_selected_echo_probability_overlay()
-        self._sync_echo_heatmap_settings_overlay(visible=echo_heatmap_active)
+        self._sync_echo_heatmap_settings_overlay(visible=settings_overlay_active)
 
     def _draw_live_overlay_layer(self) -> None:
         self._draw_live_echo_preview_overlay()
@@ -3334,6 +3371,11 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         return points
 
     def _draw_selected_lidar_reference_overlay(self) -> None:
+        lidar_points_visible = self._echo_heatmap_lidar_points_visible()
+        lidar_reference_line_visible = self._echo_heatmap_lidar_reference_line_visible()
+        if not lidar_points_visible and not lidar_reference_line_visible:
+            return
+
         wall_points: list[tuple[float, float]] = []
         for record in self._selected_record_payloads():
             measurement_position = self._selected_record_measurement_position(record)
@@ -3357,11 +3399,14 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             overlay_point = self._selected_record_overlay_point(record, measurement_position=measurement_position)
             if overlay_point is None:
                 continue
-            self._draw_lidar_scan_overlay_for_point(point=overlay_point, scan=scan)
-            wall_points.extend(self._lidar_scan_world_points_for_point(point=overlay_point, scan=scan))
-        estimate = _estimate_lower_horizontal_lidar_wall(wall_points)
-        if estimate is not None:
-            self._draw_lidar_wall_estimate(estimate)
+            if lidar_points_visible:
+                self._draw_lidar_scan_overlay_for_point(point=overlay_point, scan=scan)
+            if lidar_reference_line_visible:
+                wall_points.extend(self._lidar_scan_world_points_for_point(point=overlay_point, scan=scan))
+        if lidar_reference_line_visible:
+            estimate = _estimate_lower_horizontal_lidar_wall(wall_points)
+            if estimate is not None:
+                self._draw_lidar_wall_estimate(estimate)
 
     def _selected_record_payload(self) -> dict[str, Any] | None:
         selected_idx = self._selected_result_index
@@ -4243,6 +4288,8 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             "echo_heatmap_antenna_opening_angle_deg": self._echo_heatmap_antenna_opening_angle_deg(),
             "echo_heatmap_evaluation_visible": self._echo_heatmap_evaluation_visible(),
             "echo_heatmap_ellipses_visible": self._echo_heatmap_ellipses_visible(),
+            "echo_heatmap_lidar_points_visible": self._echo_heatmap_lidar_points_visible(),
+            "echo_heatmap_lidar_reference_line_visible": self._echo_heatmap_lidar_reference_line_visible(),
             "records": self._records,
         }
 
@@ -4363,6 +4410,12 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             )
             self.echo_heatmap_ellipses_visible_var.set(
                 bool(payload.get("echo_heatmap_ellipses_visible", False))
+            )
+            self.echo_heatmap_lidar_points_visible_var.set(
+                bool(payload.get("echo_heatmap_lidar_points_visible", True))
+            )
+            self.echo_heatmap_lidar_reference_line_visible_var.set(
+                bool(payload.get("echo_heatmap_lidar_reference_line_visible", True))
             )
             self._refresh_points_table()
             self._refresh_map_section()
