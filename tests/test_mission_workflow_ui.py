@@ -790,7 +790,9 @@ def test_draw_lidar_wall_estimate_reports_measurement_point_residual_metrics_wit
     window._draw_lidar_wall_estimate(estimate)
 
     assert messages
-    assert "σ Messpunkte=100.0cm, mittl. |Abweichung| Messpunkte=100.0cm (2 Punkte)" in messages[0]
+    assert messages[0].startswith("ℹ️ Messwand: ")
+    assert "σ LiDAR Messpunkte=2.0cm, mittl. |Abweichung| LiDAR Messpunkte=1.0cm" in messages[0]
+    assert "σ Radarmesspunkte=100.0cm, mittl. |Abweichung| Radarmesspunkte=100.0cm (2 Punkte)" in messages[0]
     assert "RMS" not in messages[0]
 
 
