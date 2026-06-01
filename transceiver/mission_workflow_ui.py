@@ -884,6 +884,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._lidar_measurement_area_edit_enabled = False
         self._lidar_measurement_area_drag_start_world: tuple[float, float] | None = None
         self._lidar_measurement_area_drag_current_world: tuple[float, float] | None = None
+        self._lidar_measurement_area_drag_active = False
         self._manual_drive_lock = threading.Lock()
         self._pending_nav2point_world_position: tuple[float, float] | None = None
         self._pending_nav2point_yaw_radians = 0.0
@@ -1376,6 +1377,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 return
             self._lidar_measurement_area_drag_start_world = world_position
             self._lidar_measurement_area_drag_current_world = world_position
+            self._lidar_measurement_area_drag_active = False
             self._draw_map_preview()
             return
         if getattr(self, "_nav2point_map_pick_mode_enabled", False):
@@ -1428,6 +1430,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             if world_position is None:
                 return
             self._lidar_measurement_area_drag_current_world = world_position
+            self._lidar_measurement_area_drag_active = True
             self._draw_map_preview()
             return
         if getattr(self, "_nav2point_map_pick_mode_enabled", False):
@@ -1459,13 +1462,19 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         if getattr(self, "_lidar_measurement_area_edit_enabled", False):
             start = self._lidar_measurement_area_drag_start_world
             current = self._lidar_measurement_area_drag_current_world
+            drag_active = getattr(self, "_lidar_measurement_area_drag_active", False)
             self._lidar_measurement_area_drag_start_world = None
             self._lidar_measurement_area_drag_current_world = None
+            self._lidar_measurement_area_drag_active = False
             if start is None or current is None:
                 return
             area = self._normalize_lidar_measurement_area(start, current)
             if area is None:
-                self._draw_map_preview()
+                if drag_active:
+                    self._draw_map_preview()
+                else:
+                    self._clear_lidar_measurement_area()
+                    self._append_validation("✅ LiDAR-Messwand entfernt.")
                 return
             self._set_lidar_measurement_area(area)
             self._append_validation(
@@ -1572,6 +1581,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             self._lidar_measurement_area_edit_enabled = False
             self._lidar_measurement_area_drag_start_world = None
             self._lidar_measurement_area_drag_current_world = None
+            self._lidar_measurement_area_drag_active = False
             lidar_area_button = getattr(self, "lidar_measurement_area_btn", None)
             if lidar_area_button is not None:
                 lidar_area_button.configure(text="Messwand")
@@ -1600,6 +1610,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             self._lidar_measurement_area_edit_enabled = False
             self._lidar_measurement_area_drag_start_world = None
             self._lidar_measurement_area_drag_current_world = None
+            self._lidar_measurement_area_drag_active = False
             lidar_area_button = getattr(self, "lidar_measurement_area_btn", None)
             if lidar_area_button is not None:
                 lidar_area_button.configure(text="Messwand")
@@ -1616,6 +1627,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._lidar_measurement_area_edit_enabled = enabled
         self._lidar_measurement_area_drag_start_world = None
         self._lidar_measurement_area_drag_current_world = None
+        self._lidar_measurement_area_drag_active = False
         if enabled:
             self._set_waypoint_map_pick_mode(False)
             self._set_rx_antenna_map_pick_mode(False)
@@ -1624,7 +1636,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             self._lidar_measurement_area_edit_enabled = True
         button = getattr(self, "lidar_measurement_area_btn", None)
         if button is not None:
-            button.configure(text="✕" if enabled else "Messwand")
+            button.configure(text="✓" if enabled else "Messwand")
         self._update_map_canvas_cursor()
         self._draw_map_preview()
 
@@ -1659,6 +1671,13 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
 
     def _set_lidar_measurement_area(self, area: LidarMeasurementArea, *, persist: bool = True) -> None:
         self._lidar_measurement_area = area
+        self._static_map_layer_signature = None
+        self._draw_map_preview()
+        if persist:
+            self._persist_workflow_state()
+
+    def _clear_lidar_measurement_area(self, *, persist: bool = True) -> None:
+        self._lidar_measurement_area = None
         self._static_map_layer_signature = None
         self._draw_map_preview()
         if persist:
@@ -1742,6 +1761,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             self._lidar_measurement_area_edit_enabled = False
             self._lidar_measurement_area_drag_start_world = None
             self._lidar_measurement_area_drag_current_world = None
+            self._lidar_measurement_area_drag_active = False
             lidar_area_button = getattr(self, "lidar_measurement_area_btn", None)
             if lidar_area_button is not None:
                 lidar_area_button.configure(text="Messwand")
@@ -1766,6 +1786,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             self._lidar_measurement_area_edit_enabled = False
             self._lidar_measurement_area_drag_start_world = None
             self._lidar_measurement_area_drag_current_world = None
+            self._lidar_measurement_area_drag_active = False
             lidar_area_button = getattr(self, "lidar_measurement_area_btn", None)
             if lidar_area_button is not None:
                 lidar_area_button.configure(text="Messwand")
