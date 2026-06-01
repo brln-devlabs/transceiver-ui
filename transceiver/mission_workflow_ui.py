@@ -3233,7 +3233,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             return False
         selected_records = self._selected_record_payloads()
         multiple_records_selected = len(selected_records) > 1
-        ellipses_visible = not multiple_records_selected or self._echo_heatmap_ellipses_visible()
+        ellipses_visible = self._echo_heatmap_ellipses_visible()
         if ellipses_visible:
             for record in selected_records:
                 measurement_position = self._selected_record_measurement_position(record)
