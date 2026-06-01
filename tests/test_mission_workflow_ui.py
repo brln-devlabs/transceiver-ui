@@ -1389,6 +1389,35 @@ def test_lidar_overlay_beam_angle_compensates_left_rotated_scanner() -> None:
     assert angle == pytest.approx(math.pi / 2.0)
 
 
+def test_draw_static_map_layer_keeps_overlay_settings_visible_without_selection() -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    original = SimpleNamespace(width=lambda: 200, height=lambda: 100)
+    preview = SimpleNamespace(width=lambda: 100, height=lambda: 50)
+    window._map_image_original = original
+    window._resize_photo_to_contain = lambda *_args, **_kwargs: preview
+    window.map_preview_canvas = SimpleNamespace(
+        delete=lambda *_args, **_kwargs: None,
+        create_image=lambda *_args, **_kwargs: 1,
+    )
+    window._live_overlay_item_ids = {}
+    window._hide_echo_heatmap_settings_overlay = lambda: None
+    window._invalidate_live_echo_geometry_cache = lambda: None
+    window._draw_mission_markers = lambda: None
+    window._draw_pending_nav2point_marker = lambda: None
+    window._draw_pending_waypoint_marker = lambda: None
+    window._draw_rx_antenna_marker = lambda: None
+    window._draw_measurement_overlay = lambda: None
+    window._draw_selected_echo_overlay = lambda: False
+    window._draw_selected_lidar_reference_overlay = lambda: None
+    window._raise_selected_echo_probability_overlay = lambda: None
+    visible_calls: list[bool] = []
+    window._sync_echo_heatmap_settings_overlay = lambda *, visible: visible_calls.append(visible)
+
+    window._draw_static_map_layer(canvas_width=100, canvas_height=80)
+
+    assert visible_calls == [True]
+
+
 def test_draw_lidar_scan_overlay_filters_points_by_tx_opening_angle() -> None:
     window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
     window._map_image_original = SimpleNamespace(width=lambda: 200, height=lambda: 120)

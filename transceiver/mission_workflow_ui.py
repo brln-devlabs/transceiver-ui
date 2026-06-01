@@ -659,7 +659,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             highlightcolor="#5f6b7a",
         )
         label_kwargs = {"bg": "#20242a", "fg": "#f5f5f5", "anchor": "w"}
-        tk.Label(frame, text="Echo-Heatmap", font=("TkDefaultFont", 9, "bold"), **label_kwargs).grid(
+        tk.Label(frame, text="Overlay", font=("TkDefaultFont", 9, "bold"), **label_kwargs).grid(
             row=0, column=0, columnspan=2, sticky="ew", padx=8, pady=(6, 2)
         )
         checkbutton_kwargs = {
@@ -672,14 +672,14 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         }
         tk.Checkbutton(
             frame,
-            text="Auswertung anzeigen",
+            text="Auswertung",
             variable=self.echo_heatmap_evaluation_visible_var,
             command=self._on_echo_heatmap_settings_changed,
             **checkbutton_kwargs,
         ).grid(row=1, column=0, columnspan=2, sticky="ew", padx=8, pady=(2, 0))
         tk.Checkbutton(
             frame,
-            text="Ellipsen anzeigen",
+            text="Ellipsen",
             variable=self.echo_heatmap_ellipses_visible_var,
             command=self._on_echo_heatmap_settings_changed,
             **checkbutton_kwargs,
@@ -1902,11 +1902,10 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._draw_rx_antenna_marker()
         self._draw_measurement_overlay()
         self._last_visible_red_echo_probability_world_points = []
-        echo_heatmap_active = self._draw_selected_echo_overlay()
+        self._draw_selected_echo_overlay()
         self._draw_selected_lidar_reference_overlay()
-        settings_overlay_active = echo_heatmap_active or len(self._selected_record_payloads()) > 1
         self._raise_selected_echo_probability_overlay()
-        self._sync_echo_heatmap_settings_overlay(visible=settings_overlay_active)
+        self._sync_echo_heatmap_settings_overlay(visible=True)
 
     def _draw_live_overlay_layer(self) -> None:
         self._draw_live_echo_preview_overlay()
