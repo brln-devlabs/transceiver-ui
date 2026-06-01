@@ -1153,9 +1153,9 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._ensure_results_table_empty_row()
         self.results_table.bind("<<TreeviewSelect>>", self._on_results_table_select)
         self.results_table.bind("<Button-1>", self._on_results_table_click, add="+")
+        self.results_table.bind("<Control-Button-1>", self._on_results_table_control_click, add="+")
         self.results_table.bind("<Double-1>", self._on_results_table_double_click, add="+")
         self.results_table.bind("<Button-3>", self._on_results_table_context_menu, add="+")
-        self.results_table.bind("<Control-Button-1>", self._on_results_table_context_menu, add="+")
         self.results_table_context_menu = tk.Menu(self.results_table, tearoff=False)
         self._results_context_review_index = 0
         self.results_table_context_menu.add_command(
@@ -2175,6 +2175,24 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             return None
         return self._clear_results_table_selection(event)
 
+    def _on_results_table_control_click(self, event: tk.Event) -> str | None:
+        row_id = self.results_table.identify_row(event.y)
+        if not row_id or row_id == RESULTS_TABLE_EMPTY_ROW_IID:
+            return None
+        selected_items = tuple(self.results_table.selection())
+        if row_id in selected_items:
+            self.results_table.selection_remove(row_id)
+        else:
+            if hasattr(self.results_table, "selection_add"):
+                self.results_table.selection_add(row_id)
+            else:
+                current_selection = tuple(self.results_table.selection())
+                self.results_table.selection_set(*(current_selection + (row_id,)))
+        if hasattr(self.results_table, "focus"):
+            self.results_table.focus(row_id)
+        self._on_results_table_select(event)
+        return "break"
+
     def _on_results_table_double_click(self, event: tk.Event) -> str | None:
         row_id = self.results_table.identify_row(event.y)
         if not row_id or row_id == RESULTS_TABLE_EMPTY_ROW_IID:
@@ -2230,9 +2248,67 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         )
         try:
             menu.tk_popup(event.x_root, event.y_root)
+            self._install_results_context_menu_dismiss_handlers()
         finally:
             menu.grab_release()
         return "break"
+
+    def _install_results_context_menu_dismiss_handlers(self) -> None:
+        self._remove_results_context_menu_dismiss_handlers()
+        try:
+            top_level = self.winfo_toplevel()
+        except Exception:
+            return
+
+        def install() -> None:
+            try:
+                button_binding_id = top_level.bind(
+                    "<ButtonPress-1>",
+                    self._dismiss_results_context_menu,
+                    add="+",
+                )
+                secondary_button_binding_id = top_level.bind(
+                    "<ButtonPress-2>",
+                    self._dismiss_results_context_menu,
+                    add="+",
+                )
+                escape_binding_id = top_level.bind(
+                    "<KeyPress-Escape>",
+                    self._dismiss_results_context_menu,
+                    add="+",
+                )
+            except Exception:
+                return
+            self._results_context_menu_dismiss_bindings = (
+                (top_level, "<ButtonPress-1>", button_binding_id),
+                (top_level, "<ButtonPress-2>", secondary_button_binding_id),
+                (top_level, "<KeyPress-Escape>", escape_binding_id),
+            )
+
+        try:
+            top_level.after_idle(install)
+        except Exception:
+            install()
+
+    def _dismiss_results_context_menu(self, _event: tk.Event | None = None) -> None:
+        menu = getattr(self, "results_table_context_menu", None)
+        if menu is not None:
+            try:
+                menu.unpost()
+            except Exception:
+                pass
+        self._remove_results_context_menu_dismiss_handlers()
+
+    def _remove_results_context_menu_dismiss_handlers(self) -> None:
+        bindings = getattr(self, "_results_context_menu_dismiss_bindings", ())
+        self._results_context_menu_dismiss_bindings = ()
+        for widget, sequence, binding_id in bindings:
+            if not binding_id:
+                continue
+            try:
+                widget.unbind(sequence, binding_id)
+            except Exception:
+                pass
 
     @staticmethod
     def _auto_detect_results_context_label(selected_count: int) -> str:
