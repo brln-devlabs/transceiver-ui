@@ -318,6 +318,7 @@ def test_draw_selected_echo_overlay_uses_live_measurement_position() -> None:
         }
     ]
     window._rx_antenna_global_position = (1.0, 1.0)
+    window.echo_heatmap_ellipses_visible_var = SimpleNamespace(get=lambda: True)
     window._mission_points = [MeasurementPoint(id="p0", name="P0", x=50.0, y=50.0, yaw=0.0)]
     calls: list[dict[str, object]] = []
     window._draw_echo_ellipse_for_overlay = lambda **kwargs: calls.append(kwargs)
@@ -326,6 +327,27 @@ def test_draw_selected_echo_overlay_uses_live_measurement_position() -> None:
 
     assert len(calls) == 1
     assert calls[0]["measurement_position"] == (7.0, -2.0)
+
+
+def test_draw_selected_echo_overlay_hides_single_selection_ellipse_when_disabled() -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    window._selected_result_index = 0
+    window._records = [
+        {
+            "point_index": 0,
+            "live_position_at_measurement": {"x": 7.0, "y": -2.0},
+            "measurement": {"result": {"echo_delays": [{"distance_m": 3.0}]}},
+        }
+    ]
+    window._rx_antenna_global_position = (1.0, 1.0)
+    window.echo_heatmap_ellipses_visible_var = SimpleNamespace(get=lambda: False)
+    calls: list[dict[str, object]] = []
+    window._draw_echo_ellipse_for_overlay = lambda **kwargs: calls.append(kwargs)
+
+    overlay_visible = window._draw_selected_echo_overlay()
+
+    assert overlay_visible is False
+    assert calls == []
 
 
 def test_draw_selected_echo_overlay_renders_all_selected_results() -> None:
