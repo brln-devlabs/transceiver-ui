@@ -3756,12 +3756,12 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         return world_points
 
     @staticmethod
-    def _line_residual_std_m(
+    def _line_residual_metrics_m(
         points: list[tuple[float, float]],
         *,
         slope: float,
         intercept: float,
-    ) -> float | None:
+    ) -> tuple[float, float] | None:
         finite_points = [
             (float(x), float(y))
             for x, y in points
@@ -3775,7 +3775,10 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         finite_residuals = residuals[np.isfinite(residuals)]
         if finite_residuals.size == 0:
             return None
-        return float(np.std(finite_residuals))
+        return (
+            float(np.std(finite_residuals)),
+            float(np.mean(np.abs(finite_residuals))),
+        )
 
     def _draw_lidar_wall_estimate(self, estimate: LidarWallEstimate) -> None:
         original = self._map_image_original
@@ -3808,15 +3811,17 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             width=LIDAR_WALL_LINE_WIDTH_PX,
         )
         red_points = getattr(self, "_last_visible_red_echo_probability_world_points", [])
-        red_points_std_m = self._line_residual_std_m(
+        red_points_metrics_m = self._line_residual_metrics_m(
             red_points,
             slope=estimate.slope,
             intercept=estimate.intercept,
         )
         red_points_summary = ""
-        if red_points_std_m is not None:
+        if red_points_metrics_m is not None:
+            red_points_std_m, red_points_mean_m = red_points_metrics_m
             red_points_summary = (
-                f", σ sichtbare rote Punkte={red_points_std_m * 100.0:.1f}cm "
+                f", σ Messpunkte={red_points_std_m * 100.0:.1f}cm, "
+                f"mittl. |Abweichung| Messpunkte={red_points_mean_m * 100.0:.1f}cm "
                 f"({len(red_points)} Punkte)"
             )
         self._append_validation(
