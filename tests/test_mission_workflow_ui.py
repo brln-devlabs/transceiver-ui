@@ -13,60 +13,74 @@ from transceiver.mission_workflow_ui import (
     LidarWallEstimate,
     MissionWorkflowWindow,
     _compute_bistatic_echo_ellipse_axes,
-    _estimate_lower_horizontal_lidar_wall,
+    _estimate_lidar_reference_wall,
 )
 
 
-def test_estimate_lower_horizontal_lidar_wall_ignores_upper_walls_and_columns() -> None:
+def test_estimate_lidar_reference_wall_uses_all_points_without_horizontal_band_selection() -> None:
     lower_wall = [(x / 10.0, 1.0 + (0.01 if x % 2 else -0.01)) for x in range(0, 31)]
     upper_wall = [(x / 10.0, 3.0 + (0.01 if x % 2 else -0.01)) for x in range(0, 31)]
     column = [(1.2 + (0.01 if y % 2 else -0.01), 1.5 + y / 10.0) for y in range(0, 10)]
 
-    estimate = _estimate_lower_horizontal_lidar_wall(lower_wall + upper_wall + column)
+    estimate = _estimate_lidar_reference_wall(lower_wall + upper_wall + column)
 
     assert estimate is not None
-    assert estimate.point_count >= len(lower_wall) - 2
-    assert abs(estimate.slope) < 0.02
-    assert estimate.intercept == pytest.approx(1.0, abs=0.03)
+    assert estimate.point_count == len(lower_wall) + len(upper_wall) + len(column)
+    assert estimate.slope == pytest.approx(0.00265, abs=1e-4)
+    assert estimate.intercept == pytest.approx(1.989, abs=0.002)
+    assert estimate.residual_std_m == pytest.approx(0.934, abs=0.002)
+
+
+def test_estimate_lidar_reference_wall_uses_non_horizontal_least_squares_line() -> None:
+    diagonal_wall = [(x / 10.0, 0.5 * (x / 10.0) + 1.2 + (0.01 if x % 2 else -0.01)) for x in range(0, 31)]
+
+    estimate = _estimate_lidar_reference_wall(diagonal_wall)
+
+    assert estimate is not None
+    assert estimate.point_count == len(diagonal_wall)
+    assert estimate.slope == pytest.approx(0.5, abs=0.01)
+    assert estimate.intercept == pytest.approx(1.2, abs=0.02)
     assert estimate.residual_std_m == pytest.approx(0.01, abs=0.004)
 
 
-def test_estimate_lower_horizontal_lidar_wall_uses_whole_map_without_measurement_area() -> None:
+def test_estimate_lidar_reference_wall_uses_whole_map_without_measurement_area() -> None:
     sparse_lower_wall = [(x / 10.0, 1.0 + (0.01 if x % 2 else -0.01)) for x in range(0, 16)]
     dense_upper_wall = [(x / 10.0, 3.0 + (0.01 if x % 2 else -0.01)) for x in range(0, 31)]
 
-    estimate = _estimate_lower_horizontal_lidar_wall(sparse_lower_wall + dense_upper_wall)
+    estimate = _estimate_lidar_reference_wall(sparse_lower_wall + dense_upper_wall)
 
     assert estimate is not None
-    assert estimate.point_count >= len(dense_upper_wall) - 2
-    assert estimate.intercept == pytest.approx(3.0, abs=0.03)
+    assert estimate.point_count == len(sparse_lower_wall) + len(dense_upper_wall)
+    assert estimate.slope == pytest.approx(0.464, abs=0.002)
+    assert estimate.intercept == pytest.approx(1.742, abs=0.002)
 
 
-def test_estimate_lower_horizontal_lidar_wall_uses_measurement_area() -> None:
+def test_estimate_lidar_reference_wall_uses_measurement_area() -> None:
     lower_wall = [(x / 10.0, 1.0 + (0.01 if x % 2 else -0.01)) for x in range(0, 31)]
     selected_upper_wall = [(x / 10.0, 3.0 + (0.01 if x % 2 else -0.01)) for x in range(0, 31)]
     measurement_area = LidarMeasurementArea(min_x=-0.1, min_y=2.8, max_x=3.1, max_y=3.2)
 
-    estimate = _estimate_lower_horizontal_lidar_wall(
+    estimate = _estimate_lidar_reference_wall(
         lower_wall + selected_upper_wall,
         measurement_area=measurement_area,
     )
 
     assert estimate is not None
-    assert estimate.point_count >= len(selected_upper_wall) - 2
+    assert estimate.point_count == len(selected_upper_wall)
     assert estimate.intercept == pytest.approx(3.0, abs=0.03)
 
 
-def test_estimate_lower_horizontal_lidar_wall_rejects_measurement_area_with_too_few_points() -> None:
+def test_estimate_lidar_reference_wall_rejects_measurement_area_with_too_few_points() -> None:
     lower_wall = [(x / 10.0, 1.0) for x in range(0, 31)]
     measurement_area = LidarMeasurementArea(min_x=0.0, min_y=2.0, max_x=1.0, max_y=3.0)
 
-    estimate = _estimate_lower_horizontal_lidar_wall(lower_wall, measurement_area=measurement_area)
+    estimate = _estimate_lidar_reference_wall(lower_wall, measurement_area=measurement_area)
 
     assert estimate is None
 
-def test_estimate_lower_horizontal_lidar_wall_rejects_too_few_points() -> None:
-    estimate = _estimate_lower_horizontal_lidar_wall([(0.0, 1.0), (1.0, 1.0)])
+
+def test_estimate_lidar_reference_wall_rejects_too_few_points() -> None:
+    estimate = _estimate_lidar_reference_wall([(0.0, 1.0), (1.0, 1.0)])
 
     assert estimate is None
 
