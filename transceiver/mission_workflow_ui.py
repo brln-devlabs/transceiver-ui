@@ -83,7 +83,6 @@ MULTI_SELECTION_PROBABILITY_DEBUG_LOG = True
 RESULTS_TABLE_EMPTY_ROW_IID = "__results_table_empty_row__"
 
 
-
 def _load_json_dict(path: Path) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -183,6 +182,17 @@ class LidarMeasurementArea:
         if not vertices:
             return True
         return _is_point_in_polygon(point, vertices)
+
+
+@dataclass(frozen=True)
+class LineResidualMetrics:
+    """Residual metrics for points relative to a line in map/world coordinates."""
+
+    point_count: int
+    residual_signed_mean_m: float
+    residual_abs_mean_m: float
+    residual_std_m: float
+    residual_rms_m: float
 
 
 @dataclass(frozen=True)
@@ -3961,7 +3971,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         *,
         slope: float,
         intercept: float,
-    ) -> tuple[float, float] | None:
+    ) -> LineResidualMetrics | None:
         finite_points = [
             (float(x), float(y))
             for x, y in points
@@ -3975,9 +3985,12 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         finite_residuals = residuals[np.isfinite(residuals)]
         if finite_residuals.size == 0:
             return None
-        return (
-            float(np.std(finite_residuals)),
-            float(np.mean(np.abs(finite_residuals))),
+        return LineResidualMetrics(
+            point_count=int(finite_residuals.size),
+            residual_signed_mean_m=float(np.mean(finite_residuals)),
+            residual_abs_mean_m=float(np.mean(np.abs(finite_residuals))),
+            residual_std_m=float(np.std(finite_residuals)),
+            residual_rms_m=float(math.sqrt(np.mean(finite_residuals * finite_residuals))),
         )
 
     def _draw_lidar_wall_estimate(self, estimate: LidarWallEstimate) -> None:
@@ -4018,18 +4031,21 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         )
         red_points_summary = ""
         if red_points_metrics_m is not None:
-            red_points_std_m, red_points_mean_m = red_points_metrics_m
             red_points_summary = (
-                f", σ Radarmesspunkte={red_points_std_m * 100.0:.1f}cm, "
-                f"mittl. |Abweichung| Radarmesspunkte={red_points_mean_m * 100.0:.1f}cm "
-                f"({len(red_points)} Punkte)"
+                "\n\nRadar-Messpunkte zur LiDAR-Linie:\n"
+                f"  Punkte: {red_points_metrics_m.point_count}\n"
+                f"  mittl. signed Abweichung: {red_points_metrics_m.residual_signed_mean_m * 100.0:.1f} cm\n"
+                f"  mittl. |Abweichung|: {red_points_metrics_m.residual_abs_mean_m * 100.0:.1f} cm\n"
+                f"  RMS: {red_points_metrics_m.residual_rms_m * 100.0:.1f} cm\n"
+                f"  σ: {red_points_metrics_m.residual_std_m * 100.0:.1f} cm"
             )
+        intercept_sign = "+" if estimate.intercept >= 0.0 else "-"
         self._append_validation(
-            "ℹ️ Messwand: "
-            f"{estimate.point_count} Punkte, "
-            f"y={estimate.slope:.4f}x+{estimate.intercept:.3f}, "
-            f"σ LiDAR Messpunkte={estimate.residual_std_m * 100.0:.1f}cm, "
-            f"mittl. |Abweichung| LiDAR Messpunkte={estimate.residual_mean_m * 100.0:.1f}cm"
+            "ℹ️ Messwand, LiDAR-Referenzmessung:\n"
+            f"  Punkte: {estimate.point_count}\n"
+            f"  Linie: y = {estimate.slope:.4f}x {intercept_sign} {abs(estimate.intercept):.3f}\n"
+            f"  σ: {estimate.residual_std_m * 100.0:.1f} cm\n"
+            f"  mittl. |Abweichung| Referenz: {estimate.residual_mean_m * 100.0:.1f} cm"
             f"{red_points_summary}"
         )
 

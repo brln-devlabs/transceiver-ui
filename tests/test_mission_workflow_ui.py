@@ -70,8 +70,6 @@ def test_estimate_lidar_reference_wall_uses_measurement_area() -> None:
     assert estimate.intercept == pytest.approx(3.0, abs=0.03)
 
 
-
-
 def test_estimate_lidar_reference_wall_uses_polygon_measurement_area() -> None:
     inside_wall = [(x / 10.0, 2.0 + (0.01 if x % 2 else -0.01)) for x in range(0, 31)]
     outside_same_bbox = [(0.2, 0.2), (1.0, 0.4), (1.5, 0.7), (2.0, 0.6), (2.8, 0.2)]
@@ -360,8 +358,6 @@ def test_draw_selected_echo_overlay_renders_all_selected_results() -> None:
 
     assert len(calls) == 2
     assert {call["measurement_position"] for call in calls} == {(7.0, -2.0), (8.0, -1.0)}
-
-
 
 
 def test_draw_selected_echo_overlay_draws_evaluation_points_above_ellipses() -> None:
@@ -761,8 +757,7 @@ def test_draw_selected_measurement_position_markers_ignore_lidar_points_toggle()
     assert kwargs["fill"] == "#212121"
 
 
-
-def test_draw_lidar_wall_estimate_reports_measurement_point_residual_metrics_without_rms() -> None:
+def test_draw_lidar_wall_estimate_reports_readable_reference_and_radar_residual_metrics() -> None:
     class FakeCanvas:
         def create_line(self, *_coords: float, **_kwargs: object) -> int:
             return 1
@@ -789,11 +784,19 @@ def test_draw_lidar_wall_estimate_reports_measurement_point_residual_metrics_wit
 
     window._draw_lidar_wall_estimate(estimate)
 
-    assert messages
-    assert messages[0].startswith("ℹ️ Messwand: ")
-    assert "σ LiDAR Messpunkte=2.0cm, mittl. |Abweichung| LiDAR Messpunkte=1.0cm" in messages[0]
-    assert "σ Radarmesspunkte=100.0cm, mittl. |Abweichung| Radarmesspunkte=100.0cm (2 Punkte)" in messages[0]
-    assert "RMS" not in messages[0]
+    assert messages == [
+        "ℹ️ Messwand, LiDAR-Referenzmessung:\n"
+        "  Punkte: 8\n"
+        "  Linie: y = 0.0000x + 0.000\n"
+        "  σ: 2.0 cm\n"
+        "  mittl. |Abweichung| Referenz: 1.0 cm\n\n"
+        "Radar-Messpunkte zur LiDAR-Linie:\n"
+        "  Punkte: 2\n"
+        "  mittl. signed Abweichung: 0.0 cm\n"
+        "  mittl. |Abweichung|: 100.0 cm\n"
+        "  RMS: 100.0 cm\n"
+        "  σ: 100.0 cm"
+    ]
 
 
 def test_draw_selected_echo_probability_overlay_tracks_visible_red_world_points() -> None:
@@ -1662,7 +1665,6 @@ def test_build_waypoint_arrow_polygon_points_up_for_ninety_degree_yaw() -> None:
     assert round(right_y, 3) == 54.0
 
 
-
 def test_build_echo_overlay_preview_points_clips_to_antenna_opening() -> None:
     window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
     window._mission = SimpleNamespace(
@@ -2313,8 +2315,6 @@ def test_open_review_for_result_row_derives_echo_delays_from_echo_lags() -> None
 
     result = window._records[0]["measurement"]["result"]
     assert result["echo_delays"] == [{"echo_index": 0, "delta_lag": 15.0, "distance_m": 22.5}]
-
-
 
 
 def test_open_review_for_result_row_scales_rereview_echo_delays_with_interpolation() -> None:
