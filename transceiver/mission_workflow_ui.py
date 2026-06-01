@@ -645,37 +645,9 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             highlightcolor="#5f6b7a",
         )
         label_kwargs = {"bg": "#20242a", "fg": "#f5f5f5", "anchor": "w"}
-        entry_kwargs = {
-            "bg": "#ffffff",
-            "fg": "#101010",
-            "insertbackground": "#101010",
-            "relief": "flat",
-        }
         tk.Label(frame, text="Echo-Heatmap", font=("TkDefaultFont", 9, "bold"), **label_kwargs).grid(
             row=0, column=0, columnspan=2, sticky="ew", padx=8, pady=(6, 2)
         )
-        tk.Label(frame, text="Linienstärke cm", **label_kwargs).grid(
-            row=1, column=0, sticky="w", padx=8, pady=2
-        )
-        tk.Entry(
-            frame,
-            textvariable=self.echo_heatmap_imaginary_line_width_var,
-            width=7,
-            validate="key",
-            validatecommand=(self.register(self._validate_positive_float_input), "%P"),
-            **entry_kwargs,
-        ).grid(row=1, column=1, sticky="w", padx=(2, 8), pady=2)
-        tk.Label(frame, text="Min. Überlappung", **label_kwargs).grid(
-            row=2, column=0, sticky="w", padx=8, pady=(2, 6)
-        )
-        tk.Entry(
-            frame,
-            textvariable=self.echo_heatmap_min_visible_overlap_var,
-            width=7,
-            validate="key",
-            validatecommand=(self.register(self._validate_positive_integer_input), "%P"),
-            **entry_kwargs,
-        ).grid(row=2, column=1, sticky="w", padx=(2, 8), pady=(2, 6))
         checkbutton_kwargs = {
             "bg": "#20242a",
             "fg": "#f5f5f5",
@@ -690,14 +662,14 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             variable=self.echo_heatmap_evaluation_visible_var,
             command=self._on_echo_heatmap_settings_changed,
             **checkbutton_kwargs,
-        ).grid(row=3, column=0, columnspan=2, sticky="ew", padx=8, pady=(2, 0))
+        ).grid(row=1, column=0, columnspan=2, sticky="ew", padx=8, pady=(2, 0))
         tk.Checkbutton(
             frame,
             text="Ellipsen anzeigen",
             variable=self.echo_heatmap_ellipses_visible_var,
             command=self._on_echo_heatmap_settings_changed,
             **checkbutton_kwargs,
-        ).grid(row=4, column=0, columnspan=2, sticky="ew", padx=8, pady=(0, 6))
+        ).grid(row=2, column=0, columnspan=2, sticky="ew", padx=8, pady=(0, 6))
         return frame
 
     def _sync_echo_heatmap_settings_overlay(self, *, visible: bool) -> None:
@@ -954,8 +926,28 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             validatecommand=(self.register(self._validate_positive_float_input), "%P"),
         ).grid(row=1, column=1, columnspan=2, padx=(6, 4), pady=(6, 0), sticky="w")
         ctk.CTkLabel(rx_position_controls, text="°").grid(
-            row=1, column=3, padx=(0, 6), pady=(6, 0), sticky="w"
+            row=1, column=3, padx=(0, 10), pady=(6, 0), sticky="w"
         )
+        ctk.CTkLabel(rx_position_controls, text="Linienstärke cm").grid(
+            row=1, column=4, padx=(0, 4), pady=(6, 0), sticky="w"
+        )
+        ctk.CTkEntry(
+            rx_position_controls,
+            textvariable=self.echo_heatmap_imaginary_line_width_var,
+            width=80,
+            validate="key",
+            validatecommand=(self.register(self._validate_positive_float_input), "%P"),
+        ).grid(row=1, column=5, padx=(0, 10), pady=(6, 0), sticky="w")
+        ctk.CTkLabel(rx_position_controls, text="Min. Überlappung").grid(
+            row=1, column=6, padx=(0, 4), pady=(6, 0), sticky="w"
+        )
+        ctk.CTkEntry(
+            rx_position_controls,
+            textvariable=self.echo_heatmap_min_visible_overlap_var,
+            width=80,
+            validate="key",
+            validatecommand=(self.register(self._validate_positive_integer_input), "%P"),
+        ).grid(row=1, column=7, padx=(0, 6), pady=(6, 0), sticky="w")
 
         side_panel = ctk.CTkFrame(map_controls_row)
         side_panel.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
