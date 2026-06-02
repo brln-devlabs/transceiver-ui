@@ -53,7 +53,7 @@ LIVE_PREVIEW_FALLBACK_REDRAW_AFTER_S = 1.0
 AUTO_STOP_CONTINUOUS_BEFORE_RUN = True
 ECHO_OVERLAY_COLORS = ("#00796B", "#FFB300", "#8E24AA", "#00ACC1", "#F4511E")
 ECHO_OVERLAY_LINE_WIDTH_PX = 1
-ECHO_HEADING_MARKERS = ("🟢", "🟠", "🟣", "🔵", "🟤")
+ECHO_HEADING_DOT_SIZE_PX = 10
 LIDAR_OVERLAY_MAX_DRAWN_BEAMS = 450
 LIDAR_OVERLAY_CELL_SIZE_PX = 3.0
 LIDAR_OVERLAY_MAX_BEAMS_PER_CELL = 2
@@ -598,6 +598,37 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
 
     def _validate_positive_float_input(self, proposed_value: str) -> bool:
         return _is_positive_float_entry_value(proposed_value)
+
+    @staticmethod
+    def _results_echo_heading_specs() -> dict[str, tuple[str, str]]:
+        """Return Treeview echo heading labels with deterministic dot colors.
+
+        Tk heading text can render color emoji as monochrome glyphs depending on
+        the platform font/theme.  The color dot is therefore drawn as a heading
+        image while the label text stays plain (E1..E5).
+        """
+        return {
+            f"echo_{index + 1}_m": (f"E{index + 1}", color)
+            for index, color in enumerate(ECHO_OVERLAY_COLORS)
+        }
+
+    @staticmethod
+    def _create_color_dot_image(master: tk.Misc, color: str) -> tk.PhotoImage:
+        size = ECHO_HEADING_DOT_SIZE_PX
+        image = tk.PhotoImage(master=master, width=size, height=size)
+        center = (size - 1) / 2.0
+        radius_sq = (size / 2.0) ** 2
+        for y in range(size):
+            for x in range(size):
+                if ((x - center) ** 2) + ((y - center) ** 2) <= radius_sq:
+                    image.put(color, to=(x, y))
+        return image
+
+    def _create_results_table_heading_images(self) -> dict[str, tk.PhotoImage]:
+        return {
+            column: self._create_color_dot_image(self.results_table, color)
+            for column, (_label, color) in self._results_echo_heading_specs().items()
+        }
 
     def _echo_heatmap_imaginary_line_width_cm(self) -> float:
         variable = getattr(self, "echo_heatmap_imaginary_line_width_var", None)
@@ -1190,20 +1221,22 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             selectmode="extended",
         )
         self.results_table.grid(row=0, column=0, sticky="nsew")
+        echo_heading_specs = self._results_echo_heading_specs()
+        self._results_table_heading_images = self._create_results_table_heading_images()
         headings = {
             "measurement_idx": "Messung",
             "idx": "Punktindex",
             "live_position": "Position",
             "live_distance_to_rx_m": "Abstand",
-            "echo_1_m": f"{ECHO_HEADING_MARKERS[0]} E1",
-            "echo_2_m": f"{ECHO_HEADING_MARKERS[1]} E2",
-            "echo_3_m": f"{ECHO_HEADING_MARKERS[2]} E3",
-            "echo_4_m": f"{ECHO_HEADING_MARKERS[3]} E4",
-            "echo_5_m": f"{ECHO_HEADING_MARKERS[4]} E5",
+            **{column: label for column, (label, _color) in echo_heading_specs.items()},
             "status": "Status",
         }
         for key, title in headings.items():
-            self.results_table.heading(key, text=title)
+            heading_options: dict[str, Any] = {"text": title}
+            if key in self._results_table_heading_images:
+                heading_options["image"] = self._results_table_heading_images[key]
+                heading_options["compound"] = "left"
+            self.results_table.heading(key, **heading_options)
             self.results_table.column(key, stretch=True, width=110)
         self.results_table.column("measurement_idx", width=80)
         self.results_table.column("live_position", width=100)
