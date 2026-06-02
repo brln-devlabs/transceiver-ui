@@ -77,7 +77,6 @@ MULTI_SELECTION_ECHO_DOT_OVERLAP_RADIUS_STEP_PX = 0.9
 MULTI_SELECTION_ECHO_DOT_MAX_RADIUS_PX = 7.0
 MULTI_SELECTION_ECHO_DOT_COLOR = "#00796B"
 MULTI_SELECTION_ECHO_DOT_OVERLAP_COLOR = "#F4511E"
-MULTI_SELECTION_ECHO_DOT_OUTLIER_COLOR = "#9E9E9E"
 MULTI_SELECTION_ECHO_DOT_SAMPLE_LEVELS = (96, 160, 240)
 MULTI_SELECTION_ECHO_DOT_MIN_VISIBLE_OVERLAP = 5
 MULTI_SELECTION_ECHO_DOT_ANTENNA_OPENING_ANGLE_DEG = 360.0
@@ -584,7 +583,6 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self.echo_heatmap_ellipses_visible_var = tk.BooleanVar(value=False)
         self.echo_heatmap_lidar_points_visible_var = tk.BooleanVar(value=True)
         self.echo_heatmap_lidar_reference_line_visible_var = tk.BooleanVar(value=True)
-        self.echo_heatmap_remove_outliers_var = tk.BooleanVar(value=False)
         self._echo_heatmap_settings_trace_pending = False
         self._live_pose_stream_active = False
 
@@ -679,12 +677,6 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             return True
         return bool(variable.get())
 
-    def _echo_heatmap_remove_outliers(self) -> bool:
-        variable = getattr(self, "echo_heatmap_remove_outliers_var", None)
-        if variable is None:
-            return False
-        return bool(variable.get())
-
     def _build_echo_heatmap_settings_overlay(self) -> tk.Frame:
         frame = tk.Frame(
             self.map_preview_canvas,
@@ -733,14 +725,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             variable=self.echo_heatmap_lidar_reference_line_visible_var,
             command=self._on_echo_heatmap_settings_changed,
             **checkbutton_kwargs,
-        ).grid(row=4, column=0, columnspan=2, sticky="ew", padx=8, pady=(0, 0))
-        tk.Checkbutton(
-            frame,
-            text="Ausreißer entfernen",
-            variable=self.echo_heatmap_remove_outliers_var,
-            command=self._on_echo_heatmap_settings_changed,
-            **checkbutton_kwargs,
-        ).grid(row=5, column=0, columnspan=2, sticky="ew", padx=8, pady=(0, 6))
+        ).grid(row=4, column=0, columnspan=2, sticky="ew", padx=8, pady=(0, 6))
         return frame
 
     def _sync_echo_heatmap_settings_overlay(self, *, visible: bool) -> None:
@@ -915,9 +900,6 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self.echo_heatmap_lidar_reference_line_visible_var.trace_add(
             "write", lambda *_args: self._on_echo_heatmap_settings_changed()
         )
-        self.echo_heatmap_remove_outliers_var.trace_add(
-            "write", lambda *_args: self._on_echo_heatmap_settings_changed()
-        )
         self._map_image_original: tk.PhotoImage | None = None
         self._map_image_preview: tk.PhotoImage | None = None
         self._map_preview_scale: tuple[float, float] = (1.0, 1.0)
@@ -1042,12 +1024,6 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             validate="key",
             validatecommand=(self.register(self._validate_positive_integer_input), "%P"),
         ).grid(row=1, column=7, padx=(0, 6), pady=(6, 0), sticky="w")
-        ctk.CTkCheckBox(
-            rx_position_controls,
-            text="Ausreißer entfernen",
-            variable=self.echo_heatmap_remove_outliers_var,
-            command=self._on_echo_heatmap_settings_changed,
-        ).grid(row=1, column=8, padx=(4, 0), pady=(6, 0), sticky="w")
 
         side_panel = ctk.CTkFrame(map_controls_row)
         side_panel.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
@@ -2284,7 +2260,6 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             self._echo_heatmap_ellipses_visible(),
             self._echo_heatmap_lidar_points_visible(),
             self._echo_heatmap_lidar_reference_line_visible(),
-            self._echo_heatmap_remove_outliers(),
             self._pending_nav2point_world_position,
             self._pending_nav2point_yaw_radians,
             self._pending_waypoint_world_position,
@@ -3323,11 +3298,6 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         imaginary_line_width_px = max(0.5, (line_width_m / resolution) * preview_scale)
         candidate_count = 0
         sampled_point_count = 0
-        outlier_filter_estimate: LidarWallEstimate | None = None
-        outlier_band_half_width_m = 0.0
-        if self._echo_heatmap_remove_outliers():
-            outlier_filter_estimate = self._selected_lidar_wall_estimate()
-            outlier_band_half_width_m = max(0.0, line_width_m / 2.0)
         opening_angle_deg = self._echo_heatmap_antenna_opening_angle_deg()
         opening_half_angle_rad = math.radians(opening_angle_deg / 2.0)
         for record in records:
@@ -3419,30 +3389,10 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 MULTI_SELECTION_ECHO_DOT_BASE_RADIUS_PX
                 + ((position_count - 1) * MULTI_SELECTION_ECHO_DOT_OVERLAP_RADIUS_STEP_PX),
             )
-            world_point: tuple[float, float] | None = None
-            is_outlier = False
-            if outlier_filter_estimate is not None:
-                try:
-                    world_point = self._preview_pixel_to_world(preview_x=center_x, preview_y=center_y)
-                except Exception:
-                    world_point = None
-                if world_point is not None:
-                    residuals = _lidar_line_residuals(
-                        [world_point],
-                        slope=outlier_filter_estimate.slope,
-                        intercept=outlier_filter_estimate.intercept,
-                    )
-                    finite_residuals = residuals[np.isfinite(residuals)]
-                    if finite_residuals.size > 0:
-                        is_outlier = abs(float(finite_residuals[0])) > outlier_band_half_width_m
             color = (
-                MULTI_SELECTION_ECHO_DOT_OUTLIER_COLOR
-                if is_outlier
-                else (
-                    MULTI_SELECTION_ECHO_DOT_OVERLAP_COLOR
-                    if position_count > 1
-                    else MULTI_SELECTION_ECHO_DOT_COLOR
-                )
+                MULTI_SELECTION_ECHO_DOT_OVERLAP_COLOR
+                if position_count > 1
+                else MULTI_SELECTION_ECHO_DOT_COLOR
             )
             self.map_preview_canvas.create_oval(
                 center_x - radius,
@@ -3454,11 +3404,10 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 tags=("selected_echo_probability_dot",),
             )
             if color == MULTI_SELECTION_ECHO_DOT_OVERLAP_COLOR:
-                if world_point is None:
-                    try:
-                        world_point = self._preview_pixel_to_world(preview_x=center_x, preview_y=center_y)
-                    except Exception:
-                        world_point = None
+                try:
+                    world_point = self._preview_pixel_to_world(preview_x=center_x, preview_y=center_y)
+                except Exception:
+                    world_point = None
                 if world_point is not None:
                     self._last_visible_red_echo_probability_world_points.append(world_point)
             drawn_points += 1
@@ -3893,36 +3842,6 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             )
             if estimate is not None:
                 self._draw_lidar_wall_estimate(estimate)
-
-    def _selected_lidar_wall_estimate(self) -> LidarWallEstimate | None:
-        wall_points: list[tuple[float, float]] = []
-        for record in self._selected_record_payloads():
-            measurement_position = self._selected_record_measurement_position(record)
-            if measurement_position is None:
-                continue
-            measurement = record.get("measurement")
-            if not isinstance(measurement, dict):
-                continue
-            result = measurement.get("result")
-            if not isinstance(result, dict):
-                continue
-            lidar_reference = result.get("lidar_reference")
-            if not isinstance(lidar_reference, dict):
-                continue
-            lidar_file = lidar_reference.get("output_file")
-            if not isinstance(lidar_file, str) or not lidar_file.strip():
-                continue
-            scan = self._load_lidar_scan_for_overlay(lidar_file)
-            if scan is None:
-                continue
-            overlay_point = self._selected_record_overlay_point(record, measurement_position=measurement_position)
-            if overlay_point is None:
-                continue
-            wall_points.extend(self._lidar_scan_world_points_for_point(point=overlay_point, scan=scan))
-        return _estimate_lidar_reference_wall(
-            wall_points,
-            measurement_area=getattr(self, "_lidar_measurement_area", None),
-        )
 
     def _selected_record_payload(self) -> dict[str, Any] | None:
         selected_idx = self._selected_result_index
@@ -4804,7 +4723,6 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             "echo_heatmap_ellipses_visible": self._echo_heatmap_ellipses_visible(),
             "echo_heatmap_lidar_points_visible": self._echo_heatmap_lidar_points_visible(),
             "echo_heatmap_lidar_reference_line_visible": self._echo_heatmap_lidar_reference_line_visible(),
-            "echo_heatmap_remove_outliers": self._echo_heatmap_remove_outliers(),
             "records": self._records,
         }
 
@@ -4934,9 +4852,6 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             )
             self.echo_heatmap_lidar_reference_line_visible_var.set(
                 bool(payload.get("echo_heatmap_lidar_reference_line_visible", True))
-            )
-            self.echo_heatmap_remove_outliers_var.set(
-                bool(payload.get("echo_heatmap_remove_outliers", False))
             )
             self._refresh_points_table()
             self._refresh_map_section()
