@@ -56,6 +56,7 @@ ECHO_OVERLAY_COLORS = ("#00796B", "#FFB300", "#8E24AA", "#00ACC1", "#F4511E")
 ECHO_OVERLAY_LINE_WIDTH_PX = 1
 ECHO_HEADING_CIRCLE_SIZE_PX = 12
 ECHO_HEADING_FONT_SIZE_PX = 12
+ECHO_RESULTS_TABLE_COLUMN_WIDTH_PX = 80
 LIDAR_OVERLAY_MAX_DRAWN_BEAMS = 450
 LIDAR_OVERLAY_CELL_SIZE_PX = 3.0
 LIDAR_OVERLAY_MAX_BEAMS_PER_CELL = 2
@@ -552,6 +553,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         *,
         master: tk.Misc | None = None,
         dot_size: int = ECHO_HEADING_CIRCLE_SIZE_PX,
+        min_width: int = ECHO_RESULTS_TABLE_COLUMN_WIDTH_PX,
     ) -> ImageTk.PhotoImage:
         font = MissionWorkflowWindow._load_echo_heading_font()
         text_bbox = font.getbbox(label)
@@ -560,17 +562,20 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         gap = 4
         padding_x = 1
         padding_y = 1
-        width = padding_x * 2 + dot_size + gap + text_width
+        content_width = padding_x * 2 + dot_size + gap + text_width
+        width = max(content_width, min_width)
         height = padding_y * 2 + max(dot_size, text_height)
 
         image = Image.new("RGBA", (width, height), (255, 255, 255, 0))
         draw = ImageDraw.Draw(image)
+        content_left = max((width - content_width) // 2, 0)
+        dot_left = content_left + padding_x
         dot_top = (height - dot_size) // 2
         draw.ellipse(
-            (padding_x, dot_top, padding_x + dot_size - 1, dot_top + dot_size - 1),
+            (dot_left, dot_top, dot_left + dot_size - 1, dot_top + dot_size - 1),
             fill=color,
         )
-        text_x = padding_x + dot_size + gap - text_bbox[0]
+        text_x = content_left + padding_x + dot_size + gap - text_bbox[0]
         text_y = (height - text_height) // 2 - text_bbox[1]
         draw.text((text_x, text_y), label, fill="#111827", font=font)
         return ImageTk.PhotoImage(image, master=master)
@@ -1269,11 +1274,11 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self.results_table.column("measurement_idx", width=80)
         self.results_table.column("live_position", width=100)
         self.results_table.column("live_distance_to_rx_m", width=90)
-        self.results_table.column("echo_1_m", width=80)
-        self.results_table.column("echo_2_m", width=80)
-        self.results_table.column("echo_3_m", width=80)
-        self.results_table.column("echo_4_m", width=80)
-        self.results_table.column("echo_5_m", width=80)
+        self.results_table.column("echo_1_m", stretch=False, width=ECHO_RESULTS_TABLE_COLUMN_WIDTH_PX)
+        self.results_table.column("echo_2_m", stretch=False, width=ECHO_RESULTS_TABLE_COLUMN_WIDTH_PX)
+        self.results_table.column("echo_3_m", stretch=False, width=ECHO_RESULTS_TABLE_COLUMN_WIDTH_PX)
+        self.results_table.column("echo_4_m", stretch=False, width=ECHO_RESULTS_TABLE_COLUMN_WIDTH_PX)
+        self.results_table.column("echo_5_m", stretch=False, width=ECHO_RESULTS_TABLE_COLUMN_WIDTH_PX)
         self.results_table.column("status", width=320)
 
         scroll = ttk.Scrollbar(table_frame, orient="vertical", command=self.results_table.yview)
