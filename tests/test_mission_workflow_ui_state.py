@@ -231,3 +231,21 @@ def test_validate_positive_integer_input_rejects_invalid_values() -> None:
     assert window._validate_positive_integer_input("-1") is False
     assert window._validate_positive_integer_input("1.5") is False
     assert window._validate_positive_integer_input("abc") is False
+
+
+def test_save_and_load_json_dict_preserves_radar_outlier_settings(tmp_path) -> None:
+    state_file = tmp_path / "mission-workflow-state.json"
+    payload = {
+        "name": "scan-radar-outliers",
+        "repeat": 1,
+        "start_point_index": 0,
+        "radar_outlier_removal_enabled": True,
+        "radar_outlier_band_width_cm": 35.5,
+        "points": [{"id": "p001", "x": 0.0, "y": 0.0, "z": 0.0, "yaw": 0.0, "enabled": True}],
+    }
+
+    _save_json_dict(state_file, payload)
+    loaded = _load_json_dict(state_file)
+
+    assert loaded["radar_outlier_removal_enabled"] is True
+    assert loaded["radar_outlier_band_width_cm"] == 35.5
