@@ -53,7 +53,7 @@ LIVE_PREVIEW_FALLBACK_REDRAW_AFTER_S = 1.0
 AUTO_STOP_CONTINUOUS_BEFORE_RUN = True
 ECHO_OVERLAY_COLORS = ("#00796B", "#FFB300", "#8E24AA", "#00ACC1", "#F4511E")
 ECHO_OVERLAY_LINE_WIDTH_PX = 1
-ECHO_HEADING_MARKERS = ("🟢", "🟠", "🟣", "🔵", "🟤")
+ECHO_HEADING_CIRCLE_SIZE_PX = 12
 LIDAR_OVERLAY_MAX_DRAWN_BEAMS = 450
 LIDAR_OVERLAY_CELL_SIZE_PX = 3.0
 LIDAR_OVERLAY_MAX_BEAMS_PER_CELL = 2
@@ -536,6 +536,38 @@ class _ManualPromptNavigator:
 
 
 class MissionWorkflowWindow(ctk.CTkToplevel):
+    @staticmethod
+    def _create_circle_photo_image(
+        color: str,
+        *,
+        master: tk.Misc | None = None,
+        size: int = ECHO_HEADING_CIRCLE_SIZE_PX,
+    ) -> tk.PhotoImage:
+        image = tk.PhotoImage(master=master, width=size, height=size)
+        center = (size - 1) / 2.0
+        radius = size / 2.0 - 1.0
+        radius_squared = radius * radius
+        for y in range(size):
+            x_start: int | None = None
+            for x in range(size):
+                dx = x - center
+                dy = y - center
+                if dx * dx + dy * dy <= radius_squared:
+                    if x_start is None:
+                        x_start = x
+                elif x_start is not None:
+                    image.put(color, to=(x_start, y, x, y + 1))
+                    x_start = None
+            if x_start is not None:
+                image.put(color, to=(x_start, y, size, y + 1))
+        return image
+
+    def _create_echo_heading_images(self) -> tuple[tk.PhotoImage, ...]:
+        return tuple(
+            self._create_circle_photo_image(color, master=self.results_table)
+            for color in ECHO_OVERLAY_COLORS
+        )
+
     def __init__(self, parent: ctk.CTk) -> None:
         super().__init__(parent)
         configure_child_window(
@@ -1190,20 +1222,29 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             selectmode="extended",
         )
         self.results_table.grid(row=0, column=0, sticky="nsew")
+        self._echo_heading_images = self._create_echo_heading_images()
         headings = {
             "measurement_idx": "Messung",
             "idx": "Punktindex",
             "live_position": "Position",
             "live_distance_to_rx_m": "Abstand",
-            "echo_1_m": f"{ECHO_HEADING_MARKERS[0]} E1",
-            "echo_2_m": f"{ECHO_HEADING_MARKERS[1]} E2",
-            "echo_3_m": f"{ECHO_HEADING_MARKERS[2]} E3",
-            "echo_4_m": f"{ECHO_HEADING_MARKERS[3]} E4",
-            "echo_5_m": f"{ECHO_HEADING_MARKERS[4]} E5",
+            "echo_1_m": "E1",
+            "echo_2_m": "E2",
+            "echo_3_m": "E3",
+            "echo_4_m": "E4",
+            "echo_5_m": "E5",
             "status": "Status",
         }
+        echo_heading_images = {
+            f"echo_{index + 1}_m": image
+            for index, image in enumerate(self._echo_heading_images[:5])
+        }
         for key, title in headings.items():
-            self.results_table.heading(key, text=title)
+            heading_options: dict[str, Any] = {"text": title}
+            image = echo_heading_images.get(key)
+            if image is not None:
+                heading_options.update({"image": image})
+            self.results_table.heading(key, **heading_options)
             self.results_table.column(key, stretch=True, width=110)
         self.results_table.column("measurement_idx", width=80)
         self.results_table.column("live_position", width=100)
