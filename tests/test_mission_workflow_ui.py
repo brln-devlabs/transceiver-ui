@@ -1000,6 +1000,17 @@ class _StringVarStub:
         self.value = value
 
 
+class _BooleanVarStub:
+    def __init__(self, value: bool = False) -> None:
+        self.value = value
+
+    def get(self) -> bool:
+        return self.value
+
+    def set(self, value: bool) -> None:
+        self.value = bool(value)
+
+
 def test_results_table_allows_extended_multiselect_mode() -> None:
     window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
     window.results_table = SimpleNamespace(cget=lambda key: "extended" if key == "selectmode" else None)
@@ -2548,6 +2559,70 @@ def test_check_run_prerequisites_skips_review_requirements_when_manual_review_di
 
     assert ok is True
     assert reasons == []
+
+
+def test_prompt_enable_live_position_before_run_activates_when_confirmed(monkeypatch: pytest.MonkeyPatch) -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    window.live_pose_stream_enabled_var = _BooleanVarStub(False)
+    window.master = SimpleNamespace()
+    messages: list[str] = []
+    calls: list[str] = []
+    window._append_validation = messages.append
+    window._on_live_pose_stream_switch_changed = lambda: calls.append("switch")
+
+    ask_calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "transceiver.mission_workflow_ui.messagebox.askyesno",
+        lambda title, message, parent=None: ask_calls.append((title, message)) or True,
+    )
+
+    assert window._prompt_enable_live_position_before_run() is True
+
+    assert window.live_pose_stream_enabled_var.get() is True
+    assert calls == ["switch"]
+    assert len(ask_calls) == 1
+    assert "Live-Position" in ask_calls[0][0]
+    assert any("aktiviert" in message for message in messages)
+
+
+def test_prompt_enable_live_position_before_run_continues_when_declined(monkeypatch: pytest.MonkeyPatch) -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    window.live_pose_stream_enabled_var = _BooleanVarStub(False)
+    window.master = SimpleNamespace()
+    messages: list[str] = []
+    calls: list[str] = []
+    window._append_validation = messages.append
+    window._on_live_pose_stream_switch_changed = lambda: calls.append("switch")
+
+    monkeypatch.setattr(
+        "transceiver.mission_workflow_ui.messagebox.askyesno",
+        lambda *_args, **_kwargs: False,
+    )
+
+    assert window._prompt_enable_live_position_before_run() is True
+
+    assert window.live_pose_stream_enabled_var.get() is False
+    assert calls == []
+    assert any("ohne aktive Live-Position" in message for message in messages)
+
+
+def test_prompt_enable_live_position_before_run_skips_prompt_when_already_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    window.live_pose_stream_enabled_var = _BooleanVarStub(True)
+    calls: list[str] = []
+    window._on_live_pose_stream_switch_changed = lambda: calls.append("switch")
+
+    monkeypatch.setattr(
+        "transceiver.mission_workflow_ui.messagebox.askyesno",
+        lambda *_args, **_kwargs: pytest.fail("prompt should not be shown"),
+    )
+
+    assert window._prompt_enable_live_position_before_run() is True
+
+    assert window.live_pose_stream_enabled_var.get() is True
+    assert calls == []
 
 
 def test_on_live_pose_stream_switch_changed_persists_and_syncs() -> None:
