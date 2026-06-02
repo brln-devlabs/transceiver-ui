@@ -4969,6 +4969,8 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         test_run_enabled = self._is_test_run_enabled()
         if not test_run_enabled and not self._ensure_transmitter_before_run():
             return
+        if not self._prompt_enable_live_position_before_run():
+            return
         if test_run_enabled:
             self._append_validation("ℹ️ Testlauf aktiv: Wegpunkte werden ohne Messung angefahren.")
         start_point_index = self._selected_start_point_index()
@@ -5188,6 +5190,27 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             self._append_validation(f"❌ Run-Start blockiert: TX-Aktivierung fehlgeschlagen ({detail}).")
             return False
         self._append_validation("✅ Transmitter aktiv ('TX (Replay): playback started.'). Mission startet.")
+        return True
+
+    def _prompt_enable_live_position_before_run(self) -> bool:
+        if bool(self.live_pose_stream_enabled_var.get()):
+            return True
+
+        should_enable = messagebox.askyesno(
+            "Live-Position inaktiv",
+            "Die Live-Position ist aktuell nicht aktiv.\n\n"
+            "Soll die Live-Position vor dem Run-Start aktiviert werden?\n\n"
+            "Ja: Live-Position aktivieren und Run starten.\n"
+            "Nein: Run ohne aktive Live-Position starten.",
+            parent=self,
+        )
+        if not should_enable:
+            self._append_validation("⚠️ Mission startet ohne aktive Live-Position (Operator-Entscheidung).")
+            return True
+
+        self.live_pose_stream_enabled_var.set(True)
+        self._append_validation("ℹ️ Live-Position wird vor dem Run-Start aktiviert.")
+        self._on_live_pose_stream_switch_changed()
         return True
 
     def _start_live_label_ticker(self) -> None:
