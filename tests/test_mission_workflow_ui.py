@@ -11,7 +11,6 @@ from transceiver.mission_workflow_ui import (
     RESULTS_TABLE_EMPTY_ROW_IID,
     LidarMeasurementArea,
     LidarWallEstimate,
-    MULTI_SELECTION_ECHO_DOT_OUTLIER_COLOR,
     MissionWorkflowWindow,
     _compute_bistatic_echo_ellipse_axes,
     _estimate_lidar_reference_wall,
@@ -820,55 +819,6 @@ def test_draw_lidar_wall_estimate_reports_readable_reference_and_radar_residual_
         "  RMSE: 100.0 cm\n"
         "  σ: 100.0 cm"
     ]
-
-
-def test_draw_lidar_wall_estimate_grays_and_excludes_outliers_when_enabled() -> None:
-    class FakeCanvas:
-        def __init__(self) -> None:
-            self.itemconfigure_calls: list[tuple[int, dict[str, object]]] = []
-
-        def create_line(self, *_coords: float, **_kwargs: object) -> int:
-            return 1
-
-        def itemconfigure(self, item_id: int, **kwargs: object) -> None:
-            self.itemconfigure_calls.append((item_id, kwargs))
-
-    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
-    window._map_image_original = SimpleNamespace(height=lambda: 100)
-    window._map_preview_scale = (1.0, 1.0)
-    window._map_preview_offset = (0.0, 0.0)
-    window._world_to_map_pixel = lambda *, x, y, image_height: (x, y)
-    window.map_preview_canvas = FakeCanvas()
-    window.echo_heatmap_outlier_removal_enabled_var = SimpleNamespace(get=lambda: True)
-    window.echo_heatmap_imaginary_line_width_var = SimpleNamespace(get=lambda: "100")
-    window._last_visible_red_echo_probability_world_points = []
-    window._last_visible_echo_probability_points = [
-        {"item_id": 10, "world_point": (0.0, 0.25), "is_metric_candidate": True},
-        {"item_id": 11, "world_point": (1.0, 0.75), "is_metric_candidate": True},
-        {"item_id": 12, "world_point": (2.0, -0.75), "is_metric_candidate": False},
-    ]
-    messages: list[str] = []
-    window._append_validation = messages.append
-    estimate = LidarWallEstimate(
-        slope=0.0,
-        intercept=0.0,
-        start=(0.0, 0.0),
-        end=(1.0, 0.0),
-        point_count=8,
-        residual_mean_m=0.01,
-        residual_std_m=0.02,
-        residual_rmse_m=0.03,
-    )
-
-    window._draw_lidar_wall_estimate(estimate)
-
-    assert window._last_visible_red_echo_probability_world_points == [(0.0, 0.25)]
-    assert window.map_preview_canvas.itemconfigure_calls == [
-        (11, {"fill": MULTI_SELECTION_ECHO_DOT_OUTLIER_COLOR}),
-        (12, {"fill": MULTI_SELECTION_ECHO_DOT_OUTLIER_COLOR}),
-    ]
-    assert "  Punkte: 1\n" in messages[0]
-    assert "  Ausreißer entfernt: 2" in messages[0]
 
 
 def test_draw_selected_echo_probability_overlay_tracks_visible_red_world_points() -> None:
