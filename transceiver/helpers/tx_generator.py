@@ -278,18 +278,18 @@ def generate_waveform(
         phi = 2 * np.pi * (f0 * t + 0.5 * k * t**2)
         return np.exp(1j * phi).astype(np.complex64)
 
+
     # ---------- Zadoff–Chu ----------------------------------------------------
     if w == "zadoffchu":
         if q == 0:
             raise ValueError("Zadoff-Chu-Parameter q darf nicht 0 sein.")
         if gcd(q, N) != 1:
-            print(f"WARNUNG: q={q} nicht teilerfremd zu N={N}.")
+            raise ValueError(f"q={q} ist nicht teilerfremd zu N={N}.")
 
-        n = np.arange(N)
-        if N % 2:
-            symbols = np.exp(-1j * np.pi * q * n**2 / N).astype(np.complex64)
-        else:
-            symbols = np.exp(-1j * np.pi * q * n * (n + 1) / N).astype(np.complex64)
+        n = np.arange(N, dtype=np.float64)
+        symbols = np.exp(
+            -1j * np.pi * q * n * (n + (N % 2)) / N
+        ).astype(np.complex64)
 
         return symbols
 
@@ -548,10 +548,11 @@ def main() -> None:
     N_output = N_waveform
 
     if args.waveform == "zadoffchu":
-        prime = find_prime_near(N_waveform, search_up=True)
-        if prime != N_waveform:
-            print(f"Info: samples={N_waveform} angepasst auf Primzahl {prime} für ZC.")
-            N_waveform = prime
+        if gcd(args.q, N_waveform) != 1:
+            raise ValueError(
+                f"Für Zadoff-Chu müssen q und N teilerfremd sein: "
+                f"q={args.q}, N={N_waveform}"
+            )
     elif args.waveform == "ofdm_preamble":
         N_output = (
             (args.ofdm_nfft + args.ofdm_cp)
