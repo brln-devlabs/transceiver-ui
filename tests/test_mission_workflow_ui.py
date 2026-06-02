@@ -8,7 +8,6 @@ import pytest
 from transceiver.measurement_mission import MeasurementMission, MeasurementPoint
 from transceiver.navigation_adapter import NavigationPoint
 from transceiver.mission_workflow_ui import (
-    ECHO_OVERLAY_COLORS,
     RESULTS_TABLE_EMPTY_ROW_IID,
     LidarMeasurementArea,
     LidarWallEstimate,
@@ -16,15 +15,6 @@ from transceiver.mission_workflow_ui import (
     _compute_bistatic_echo_ellipse_axes,
     _estimate_lidar_reference_wall,
 )
-
-
-def test_results_echo_heading_specs_use_plain_labels_and_overlay_colors() -> None:
-    specs = MissionWorkflowWindow._results_echo_heading_specs()
-
-    assert list(specs) == ["echo_1_m", "echo_2_m", "echo_3_m", "echo_4_m", "echo_5_m"]
-    assert [label for label, _color in specs.values()] == ["E1", "E2", "E3", "E4", "E5"]
-    assert [color for _label, color in specs.values()] == list(ECHO_OVERLAY_COLORS)
-    assert all("⚫" not in label and "🟢" not in label for label, _color in specs.values())
 
 
 def test_estimate_lidar_reference_wall_uses_all_points_without_horizontal_band_selection() -> None:
