@@ -77,6 +77,7 @@ MULTI_SELECTION_ECHO_DOT_OVERLAP_RADIUS_STEP_PX = 0.9
 MULTI_SELECTION_ECHO_DOT_MAX_RADIUS_PX = 7.0
 MULTI_SELECTION_ECHO_DOT_COLOR = "#00796B"
 MULTI_SELECTION_ECHO_DOT_OVERLAP_COLOR = "#F4511E"
+MULTI_SELECTION_ECHO_DOT_OUTLIER_COLOR = "#9E9E9E"
 MULTI_SELECTION_ECHO_DOT_SAMPLE_LEVELS = (96, 160, 240)
 MULTI_SELECTION_ECHO_DOT_MIN_VISIBLE_OVERLAP = 5
 MULTI_SELECTION_ECHO_DOT_ANTENNA_OPENING_ANGLE_DEG = 360.0
@@ -576,6 +577,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self.echo_heatmap_min_visible_overlap_var = tk.StringVar(
             value=str(MULTI_SELECTION_ECHO_DOT_MIN_VISIBLE_OVERLAP)
         )
+        self.echo_heatmap_outlier_removal_enabled_var = tk.BooleanVar(value=False)
         self.echo_heatmap_antenna_opening_angle_deg_var = tk.StringVar(
             value=f"{MULTI_SELECTION_ECHO_DOT_ANTENNA_OPENING_ANGLE_DEG:g}"
         )
@@ -652,6 +654,12 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             default=MULTI_SELECTION_ECHO_DOT_ANTENNA_OPENING_ANGLE_DEG,
         )
         return min(360.0, angle)
+
+    def _echo_heatmap_outlier_removal_enabled(self) -> bool:
+        variable = getattr(self, "echo_heatmap_outlier_removal_enabled_var", None)
+        if variable is None:
+            return False
+        return bool(variable.get())
 
     def _echo_heatmap_evaluation_visible(self) -> bool:
         variable = getattr(self, "echo_heatmap_evaluation_visible_var", None)
@@ -885,6 +893,9 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self.echo_heatmap_min_visible_overlap_var.trace_add(
             "write", lambda *_args: self._on_echo_heatmap_settings_changed()
         )
+        self.echo_heatmap_outlier_removal_enabled_var.trace_add(
+            "write", lambda *_args: self._on_echo_heatmap_settings_changed()
+        )
         self.echo_heatmap_antenna_opening_angle_deg_var.trace_add(
             "write", lambda *_args: self._on_echo_heatmap_settings_changed()
         )
@@ -933,6 +944,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._ellipse_unit_circle_cache: dict[int, tuple[tuple[float, float], ...]] = {}
         self._live_echo_geometry_cache: dict[str, dict[str, Any]] = {}
         self._last_visible_red_echo_probability_world_points: list[tuple[float, float]] = []
+        self._last_visible_echo_probability_points: list[dict[str, Any]] = []
         self._last_live_diagnosis_key: str | None = None
         self._emit_live_diagnostics_to_validation = True
         self._rx_antenna_global_position: tuple[float, float] | None = None
@@ -1024,6 +1036,12 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             validate="key",
             validatecommand=(self.register(self._validate_positive_integer_input), "%P"),
         ).grid(row=1, column=7, padx=(0, 6), pady=(6, 0), sticky="w")
+        ctk.CTkCheckBox(
+            rx_position_controls,
+            text="Ausreißer entfernen",
+            variable=self.echo_heatmap_outlier_removal_enabled_var,
+            command=self._on_echo_heatmap_settings_changed,
+        ).grid(row=1, column=8, padx=(6, 0), pady=(6, 0), sticky="w")
 
         side_panel = ctk.CTkFrame(map_controls_row)
         side_panel.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
@@ -2256,6 +2274,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             getattr(self, "_lidar_measurement_area_drag_current_world", None),
             self._echo_heatmap_imaginary_line_width_cm(),
             self._echo_heatmap_min_visible_overlap(),
+            self._echo_heatmap_outlier_removal_enabled(),
             self._echo_heatmap_evaluation_visible(),
             self._echo_heatmap_ellipses_visible(),
             self._echo_heatmap_lidar_points_visible(),
@@ -2295,6 +2314,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._draw_rx_antenna_marker()
         self._draw_measurement_overlay()
         self._last_visible_red_echo_probability_world_points = []
+        self._last_visible_echo_probability_points = []
         self._draw_selected_echo_overlay()
         self._draw_selected_lidar_reference_overlay()
         self._draw_selected_measurement_position_markers()
@@ -3288,6 +3308,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         if not math.isfinite(resolution) or resolution <= 0.0:
             return False
         self._last_visible_red_echo_probability_world_points = []
+        self._last_visible_echo_probability_points = []
         ellipse_point_cells: dict[tuple[int, int], dict[str, Any]] = {}
         imaginary_line_width_cm = self._echo_heatmap_imaginary_line_width_cm()
         if not math.isfinite(imaginary_line_width_cm) or imaginary_line_width_cm <= 0.0:
@@ -3394,7 +3415,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 if position_count > 1
                 else MULTI_SELECTION_ECHO_DOT_COLOR
             )
-            self.map_preview_canvas.create_oval(
+            item_id = self.map_preview_canvas.create_oval(
                 center_x - radius,
                 center_y - radius,
                 center_x + radius,
@@ -3403,13 +3424,21 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 outline="",
                 tags=("selected_echo_probability_dot",),
             )
-            if color == MULTI_SELECTION_ECHO_DOT_OVERLAP_COLOR:
-                try:
-                    world_point = self._preview_pixel_to_world(preview_x=center_x, preview_y=center_y)
-                except Exception:
-                    world_point = None
-                if world_point is not None:
-                    self._last_visible_red_echo_probability_world_points.append(world_point)
+            try:
+                world_point_for_filter = self._preview_pixel_to_world(preview_x=center_x, preview_y=center_y)
+            except Exception:
+                world_point_for_filter = None
+            if world_point_for_filter is not None:
+                self._last_visible_echo_probability_points.append(
+                    {
+                        "item_id": item_id,
+                        "world_point": world_point_for_filter,
+                        "color": color,
+                        "is_metric_candidate": color == MULTI_SELECTION_ECHO_DOT_OVERLAP_COLOR,
+                    }
+                )
+            if color == MULTI_SELECTION_ECHO_DOT_OVERLAP_COLOR and world_point_for_filter is not None:
+                self._last_visible_red_echo_probability_world_points.append(world_point_for_filter)
             drawn_points += 1
         if MULTI_SELECTION_PROBABILITY_DEBUG_LOG:
             self._append_validation(
@@ -3994,6 +4023,63 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             residual_rmse_m=float(math.sqrt(np.mean(finite_residuals * finite_residuals))),
         )
 
+    def _echo_heatmap_outlier_band_half_width_m(self) -> float:
+        line_width_cm = self._echo_heatmap_imaginary_line_width_cm()
+        if not math.isfinite(line_width_cm) or line_width_cm <= 0.0:
+            return 0.0
+        return line_width_cm / 200.0
+
+    def _filter_radar_points_by_lidar_reference_line(
+        self,
+        *,
+        slope: float,
+        intercept: float,
+    ) -> tuple[list[tuple[float, float]], int]:
+        visible_points = getattr(self, "_last_visible_echo_probability_points", [])
+        if not visible_points:
+            return (list(getattr(self, "_last_visible_red_echo_probability_world_points", [])), 0)
+        if not self._echo_heatmap_outlier_removal_enabled():
+            return (
+                [
+                    entry["world_point"]
+                    for entry in visible_points
+                    if isinstance(entry, dict) and entry.get("is_metric_candidate")
+                ],
+                0,
+            )
+        half_width_m = self._echo_heatmap_outlier_band_half_width_m()
+        if half_width_m <= 0.0:
+            return ([], 0)
+        kept_metric_points: list[tuple[float, float]] = []
+        outlier_count = 0
+        for entry in visible_points:
+            if not isinstance(entry, dict):
+                continue
+            world_point = entry.get("world_point")
+            if (
+                not isinstance(world_point, tuple)
+                or len(world_point) != 2
+                or not math.isfinite(float(world_point[0]))
+                or not math.isfinite(float(world_point[1]))
+            ):
+                continue
+            residuals = _lidar_line_residuals([world_point], slope=slope, intercept=intercept)
+            if residuals.size == 0 or not math.isfinite(float(residuals[0])):
+                continue
+            residual = abs(float(residuals[0]))
+            if residual <= half_width_m:
+                if entry.get("is_metric_candidate"):
+                    kept_metric_points.append(world_point)
+                continue
+            outlier_count += 1
+            item_id = entry.get("item_id")
+            if isinstance(item_id, int):
+                try:
+                    self.map_preview_canvas.itemconfigure(item_id, fill=MULTI_SELECTION_ECHO_DOT_OUTLIER_COLOR)
+                except tk.TclError:
+                    pass
+        return (kept_metric_points, outlier_count)
+
     def _draw_lidar_wall_estimate(self, estimate: LidarWallEstimate) -> None:
         original = self._map_image_original
         if original is None:
@@ -4024,7 +4110,11 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             fill=LIDAR_WALL_LINE_COLOR,
             width=LIDAR_WALL_LINE_WIDTH_PX,
         )
-        red_points = getattr(self, "_last_visible_red_echo_probability_world_points", [])
+        red_points, outlier_count = self._filter_radar_points_by_lidar_reference_line(
+            slope=estimate.slope,
+            intercept=estimate.intercept,
+        )
+        self._last_visible_red_echo_probability_world_points = red_points
         red_points_metrics_m = self._line_residual_metrics_m(
             red_points,
             slope=estimate.slope,
@@ -4039,6 +4129,14 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 f"  mittl. |Abweichung|: {red_points_metrics_m.residual_abs_mean_m * 100.0:.1f} cm\n"
                 f"  RMSE: {red_points_metrics_m.residual_rmse_m * 100.0:.1f} cm\n"
                 f"  σ: {red_points_metrics_m.residual_std_m * 100.0:.1f} cm"
+            )
+            if self._echo_heatmap_outlier_removal_enabled():
+                red_points_summary += f"\n  Ausreißer entfernt: {outlier_count}"
+        elif self._echo_heatmap_outlier_removal_enabled():
+            red_points_summary = (
+                "\n\nRadar-Messpunkte zur LiDAR-Linie:\n"
+                f"  Punkte: 0\n"
+                f"  Ausreißer entfernt: {outlier_count}"
             )
         intercept_sign = "+" if estimate.intercept >= 0.0 else "-"
         self._append_validation(
@@ -4718,6 +4816,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             "live_preview_enabled": bool(self.live_preview_enabled_var.get()),
             "echo_heatmap_imaginary_line_width_cm": self._echo_heatmap_imaginary_line_width_cm(),
             "echo_heatmap_min_visible_overlap": self._echo_heatmap_min_visible_overlap(),
+            "echo_heatmap_outlier_removal_enabled": self._echo_heatmap_outlier_removal_enabled(),
             "echo_heatmap_antenna_opening_angle_deg": self._echo_heatmap_antenna_opening_angle_deg(),
             "echo_heatmap_evaluation_visible": self._echo_heatmap_evaluation_visible(),
             "echo_heatmap_ellipses_visible": self._echo_heatmap_ellipses_visible(),
@@ -4833,6 +4932,9 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                         default=MULTI_SELECTION_ECHO_DOT_MIN_VISIBLE_OVERLAP,
                     )
                 )
+            )
+            self.echo_heatmap_outlier_removal_enabled_var.set(
+                bool(payload.get("echo_heatmap_outlier_removal_enabled", False))
             )
             echo_heatmap_antenna_opening_angle_deg = _parse_positive_float(
                 payload.get("echo_heatmap_antenna_opening_angle_deg"),
