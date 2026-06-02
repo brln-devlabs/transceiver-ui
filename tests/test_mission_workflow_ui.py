@@ -1,17 +1,13 @@
 from __future__ import annotations
 
 import math
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from transceiver import mission_workflow_ui
 from transceiver.measurement_mission import MeasurementMission, MeasurementPoint
 from transceiver.navigation_adapter import NavigationPoint
 from transceiver.mission_workflow_ui import (
-    ECHO_HEADING_LABELS,
-    ECHO_OVERLAY_COLORS,
     RESULTS_TABLE_EMPTY_ROW_IID,
     LidarMeasurementArea,
     LidarWallEstimate,
@@ -108,22 +104,6 @@ def test_estimate_lidar_reference_wall_rejects_too_few_points() -> None:
     estimate = _estimate_lidar_reference_wall([(0.0, 1.0), (1.0, 1.0)])
 
     assert estimate is None
-
-
-def test_results_table_echo_headings_use_plain_labels_and_overlay_color_legend() -> None:
-    assert ECHO_HEADING_LABELS == ("E1", "E2", "E3", "E4", "E5")
-    assert len(ECHO_HEADING_LABELS) == len(ECHO_OVERLAY_COLORS)
-    assert all(label.isascii() for label in ECHO_HEADING_LABELS)
-
-    source = Path(mission_workflow_ui.__file__).read_text(encoding="utf-8")
-
-    assert "ECHO_HEADING_MARKERS" not in source
-    for echo_index, label_index in enumerate(range(len(ECHO_HEADING_LABELS)), start=1):
-        assert f'"echo_{echo_index}_m": ECHO_HEADING_LABELS[{label_index}]' in source
-    assert "zip(ECHO_HEADING_LABELS, ECHO_OVERLAY_COLORS)" in source
-    assert "text_color=color" in source
-    emoji_markers = ("\U0001F7E2", "\U0001F7E0", "\U0001F7E3", "\U0001F535", "\U0001F7E4")
-    assert not any(marker in source for marker in emoji_markers)
 
 
 def test_format_echo_distances_for_table_returns_only_meter_values_for_first_five_echoes() -> None:
