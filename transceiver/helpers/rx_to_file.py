@@ -152,6 +152,15 @@ def rfnoc_dram_rx(args):
         )
         radio.set_rx_frequency(args.freq, radio_chan)
         radio.set_rx_gain(args.gain, radio_chan)
+        requested_gain = args.gain
+        actual_gain = radio.get_rx_gain(radio_chan)
+
+        if abs(actual_gain - requested_gain) > 0.01:
+            print(
+                f"WARNING: Requested RX gain {requested_gain} dB, "
+                f"but device uses {actual_gain} dB.",
+                file=sys.stderr,
+            )
         if ddc_info:
             ddc, ddc_chan = ddc_info
             ddc.set_output_rate(args.rate, ddc_chan)
