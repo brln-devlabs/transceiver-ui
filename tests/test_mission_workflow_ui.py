@@ -626,6 +626,7 @@ def test_workflow_state_payload_persists_echo_heatmap_settings() -> None:
     window.echo_heatmap_ellipses_visible_var = SimpleNamespace(get=lambda: True)
     window.echo_heatmap_lidar_points_visible_var = SimpleNamespace(get=lambda: False)
     window.echo_heatmap_lidar_reference_line_visible_var = SimpleNamespace(get=lambda: True)
+    window.echo_heatmap_remove_outliers_var = SimpleNamespace(get=lambda: True)
     window._records = []
 
     payload = window._build_workflow_state_payload()
@@ -636,6 +637,7 @@ def test_workflow_state_payload_persists_echo_heatmap_settings() -> None:
     assert payload["echo_heatmap_ellipses_visible"] is True
     assert payload["echo_heatmap_lidar_points_visible"] is False
     assert payload["echo_heatmap_lidar_reference_line_visible"] is True
+    assert payload["echo_heatmap_remove_outliers"] is True
 
 
 def test_selected_record_overlay_point_prefers_live_yaw() -> None:
@@ -851,6 +853,59 @@ def test_draw_selected_echo_probability_overlay_tracks_visible_red_world_points(
 
     assert drawn is True
     assert window._last_visible_red_echo_probability_world_points == [(1.0, 2.0)]
+
+
+def test_draw_selected_echo_probability_overlay_greys_lidar_line_outliers_and_excludes_metrics() -> None:
+    class FakeCanvas:
+        def __init__(self) -> None:
+            self.ovals: list[tuple[tuple[float, ...], dict[str, object]]] = []
+
+        def create_oval(self, *coords: float, **kwargs: object) -> int:
+            self.ovals.append((coords, kwargs))
+            return len(self.ovals)
+
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    window._mission = SimpleNamespace(map_config=SimpleNamespace(resolution=1.0))
+    window._map_image_original = SimpleNamespace(height=lambda: 100)
+    window._map_preview_scale = (1.0, 1.0)
+    window.map_preview_canvas = FakeCanvas()
+    window.echo_heatmap_min_visible_overlap_var = SimpleNamespace(get=lambda: "1")
+    window.echo_heatmap_imaginary_line_width_var = SimpleNamespace(get=lambda: "10")
+    window.echo_heatmap_remove_outliers_var = SimpleNamespace(get=lambda: True)
+    window._append_validation = lambda _message: None
+    window._preview_pixel_to_world = lambda *, preview_x, preview_y: (preview_x / 10.0, preview_y / 10.0)
+    window._selected_lidar_wall_estimate = lambda: LidarWallEstimate(
+        slope=0.0,
+        intercept=0.0,
+        start=(0.0, 0.0),
+        end=(10.0, 0.0),
+        point_count=8,
+        residual_mean_m=0.0,
+        residual_std_m=0.0,
+        residual_rmse_m=0.0,
+    )
+
+    def preview_points(*, measurement_position, **_kwargs):
+        if measurement_position[0] < 2.0:
+            return [10.0, 100.0], 1
+        return [10.0, 0.0], 1
+
+    window._build_echo_overlay_preview_points = preview_points
+    records = [
+        {
+            "live_position_at_measurement": {"x": float(index), "y": 0.0, "yaw": 0.0},
+            "measurement": {"result": {"echo_delays": [{"distance_m": 1.0}]}},
+        }
+        for index in range(4)
+    ]
+
+    drawn = window._draw_selected_echo_probability_overlay(rx_position=(0.0, 0.0), records=records)
+
+    assert drawn is True
+    fills = [kwargs["fill"] for _coords, kwargs in window.map_preview_canvas.ovals]
+    assert "#9E9E9E" in fills
+    assert "#F4511E" in fills
+    assert window._last_visible_red_echo_probability_world_points == [(1.0, 0.0)]
 
 
 def test_resolve_cmd_vel_topic_uses_namespace_when_present() -> None:
