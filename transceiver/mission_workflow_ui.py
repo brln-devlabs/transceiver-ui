@@ -53,7 +53,7 @@ LIVE_PREVIEW_FALLBACK_REDRAW_AFTER_S = 1.0
 AUTO_STOP_CONTINUOUS_BEFORE_RUN = True
 ECHO_OVERLAY_COLORS = ("#00796B", "#FFB300", "#8E24AA", "#00ACC1", "#F4511E")
 ECHO_OVERLAY_LINE_WIDTH_PX = 1
-ECHO_HEADING_LABELS = ("E1", "E2", "E3", "E4", "E5")
+ECHO_HEADING_MARKERS = ("🟢", "🟠", "🟣", "🔵", "🟤")
 LIDAR_OVERLAY_MAX_DRAWN_BEAMS = 450
 LIDAR_OVERLAY_CELL_SIZE_PX = 3.0
 LIDAR_OVERLAY_MAX_BEAMS_PER_CELL = 2
@@ -1168,7 +1168,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         table_frame = ctk.CTkFrame(self)
         table_frame.grid(row=5, column=0, sticky="nsew", padx=10, pady=(0, 10))
         table_frame.columnconfigure(0, weight=1)
-        table_frame.rowconfigure(1, weight=1)
+        table_frame.rowconfigure(0, weight=1)
 
         columns = (
             "measurement_idx",
@@ -1182,7 +1182,6 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             "echo_5_m",
             "status",
         )
-        self._build_echo_results_legend(table_frame)
         self.results_table = ttk.Treeview(
             table_frame,
             columns=columns,
@@ -1190,17 +1189,17 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             height=14,
             selectmode="extended",
         )
-        self.results_table.grid(row=1, column=0, sticky="nsew")
+        self.results_table.grid(row=0, column=0, sticky="nsew")
         headings = {
             "measurement_idx": "Messung",
             "idx": "Punktindex",
             "live_position": "Position",
             "live_distance_to_rx_m": "Abstand",
-            "echo_1_m": ECHO_HEADING_LABELS[0],
-            "echo_2_m": ECHO_HEADING_LABELS[1],
-            "echo_3_m": ECHO_HEADING_LABELS[2],
-            "echo_4_m": ECHO_HEADING_LABELS[3],
-            "echo_5_m": ECHO_HEADING_LABELS[4],
+            "echo_1_m": f"{ECHO_HEADING_MARKERS[0]} E1",
+            "echo_2_m": f"{ECHO_HEADING_MARKERS[1]} E2",
+            "echo_3_m": f"{ECHO_HEADING_MARKERS[2]} E3",
+            "echo_4_m": f"{ECHO_HEADING_MARKERS[3]} E4",
+            "echo_5_m": f"{ECHO_HEADING_MARKERS[4]} E5",
             "status": "Status",
         }
         for key, title in headings.items():
@@ -1217,7 +1216,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self.results_table.column("status", width=320)
 
         scroll = ttk.Scrollbar(table_frame, orient="vertical", command=self.results_table.yview)
-        scroll.grid(row=1, column=1, sticky="ns")
+        scroll.grid(row=0, column=1, sticky="ns")
         self.results_table.configure(yscrollcommand=scroll.set)
         self._ensure_results_table_empty_row()
         self.results_table.bind("<<TreeviewSelect>>", self._on_results_table_select)
@@ -1255,7 +1254,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         )
         self.results_selection_diagnostics_var = tk.StringVar(value="Auswahl: 0 Zeilen")
         results_footer = ctk.CTkFrame(table_frame, fg_color="transparent")
-        results_footer.grid(row=2, column=0, sticky="ew", pady=(4, 0))
+        results_footer.grid(row=1, column=0, sticky="ew", pady=(4, 0))
         results_footer.columnconfigure(0, weight=1)
         ctk.CTkLabel(
             results_footer,
@@ -1276,22 +1275,6 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._refresh_start_point_options()
         self._refresh_map_section()
         self._refresh_review_ready_indicator()
-
-    def _build_echo_results_legend(self, parent: tk.Widget) -> None:
-        legend = ctk.CTkFrame(parent, fg_color="transparent")
-        legend.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 4))
-        ctk.CTkLabel(legend, text="Echo-Farben:", anchor="w").grid(row=0, column=0, padx=(0, 8), sticky="w")
-        for echo_index, (label, color) in enumerate(zip(ECHO_HEADING_LABELS, ECHO_OVERLAY_COLORS), start=1):
-            item = ctk.CTkFrame(legend, fg_color="transparent")
-            item.grid(row=0, column=echo_index, padx=(0, 10), sticky="w")
-            ctk.CTkLabel(
-                item,
-                text="●",
-                text_color=color,
-                width=14,
-                font=ctk.CTkFont(size=16, weight="bold"),
-            ).grid(row=0, column=0, sticky="w")
-            ctk.CTkLabel(item, text=label, width=24, anchor="w").grid(row=0, column=1, padx=(2, 0), sticky="w")
 
     def _stabilize_initial_geometry(self) -> None:
         """Ensure all control rows are visible right after opening the window."""
