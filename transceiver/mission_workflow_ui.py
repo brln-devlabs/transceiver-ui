@@ -55,6 +55,7 @@ AUTO_STOP_CONTINUOUS_BEFORE_RUN = True
 ECHO_OVERLAY_COLORS = ("#00796B", "#FFB300", "#8E24AA", "#00ACC1", "#F4511E")
 ECHO_OVERLAY_LINE_WIDTH_PX = 1
 ECHO_HEADING_CIRCLE_SIZE_PX = 12
+ECHO_HEADING_FONT_SIZE_PX = 10
 LIDAR_OVERLAY_MAX_DRAWN_BEAMS = 450
 LIDAR_OVERLAY_CELL_SIZE_PX = 3.0
 LIDAR_OVERLAY_MAX_BEAMS_PER_CELL = 2
@@ -538,6 +539,13 @@ class _ManualPromptNavigator:
 
 class MissionWorkflowWindow(ctk.CTkToplevel):
     @staticmethod
+    def _load_echo_heading_font() -> ImageFont.ImageFont:
+        try:
+            return ImageFont.truetype("DejaVuSans-Bold.ttf", ECHO_HEADING_FONT_SIZE_PX)
+        except OSError:
+            return ImageFont.load_default()
+
+    @staticmethod
     def _create_echo_heading_label_image(
         color: str,
         label: str,
@@ -545,7 +553,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         master: tk.Misc | None = None,
         dot_size: int = ECHO_HEADING_CIRCLE_SIZE_PX,
     ) -> ImageTk.PhotoImage:
-        font = ImageFont.load_default()
+        font = MissionWorkflowWindow._load_echo_heading_font()
         text_bbox = font.getbbox(label)
         text_width = text_bbox[2] - text_bbox[0]
         text_height = text_bbox[3] - text_bbox[1]
@@ -1250,7 +1258,10 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         }
         for key, title in headings.items():
             image = echo_heading_images.get(key)
-            heading_options: dict[str, Any] = {"text": "" if image is not None else title}
+            heading_options: dict[str, Any] = {
+                "anchor": "center",
+                "text": "" if image is not None else title,
+            }
             if image is not None:
                 heading_options.update({"image": image})
             self.results_table.heading(key, **heading_options)
