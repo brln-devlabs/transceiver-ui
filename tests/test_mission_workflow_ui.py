@@ -623,6 +623,7 @@ def test_workflow_state_payload_persists_echo_heatmap_settings() -> None:
     window.live_preview_enabled_var = SimpleNamespace(get=lambda: False)
     window.echo_heatmap_imaginary_line_width_var = SimpleNamespace(get=lambda: "6.5")
     window.echo_heatmap_min_visible_overlap_var = SimpleNamespace(get=lambda: "7")
+    window.echo_heatmap_outlier_removal_enabled_var = SimpleNamespace(get=lambda: True)
     window.echo_heatmap_evaluation_visible_var = SimpleNamespace(get=lambda: False)
     window.echo_heatmap_ellipses_visible_var = SimpleNamespace(get=lambda: True)
     window.echo_heatmap_lidar_points_visible_var = SimpleNamespace(get=lambda: False)
@@ -633,6 +634,7 @@ def test_workflow_state_payload_persists_echo_heatmap_settings() -> None:
 
     assert payload["echo_heatmap_imaginary_line_width_cm"] == 6.5
     assert payload["echo_heatmap_min_visible_overlap"] == 7
+    assert payload["echo_heatmap_outlier_removal_enabled"] is True
     assert payload["echo_heatmap_evaluation_visible"] is False
     assert payload["echo_heatmap_ellipses_visible"] is True
     assert payload["echo_heatmap_lidar_points_visible"] is False
@@ -869,6 +871,24 @@ def test_draw_lidar_wall_estimate_grays_and_excludes_outliers_when_enabled() -> 
     ]
     assert "  Punkte: 1\n" in messages[0]
     assert "  Ausreißer entfernt: 2" in messages[0]
+
+
+def test_filter_radar_points_uses_all_visible_overlay_points_for_metrics() -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    window.echo_heatmap_outlier_removal_enabled_var = SimpleNamespace(get=lambda: False)
+    window._last_visible_red_echo_probability_world_points = []
+    window._last_visible_echo_probability_points = [
+        {"item_id": 10, "world_point": (0.0, 0.25), "color": "#00796B"},
+        {"item_id": 11, "world_point": (1.0, 0.75), "color": "#F4511E"},
+    ]
+
+    metric_points, outlier_count = window._filter_radar_points_by_lidar_reference_line(
+        slope=0.0,
+        intercept=0.0,
+    )
+
+    assert metric_points == [(0.0, 0.25), (1.0, 0.75)]
+    assert outlier_count == 0
 
 
 def test_draw_selected_echo_probability_overlay_tracks_visible_red_world_points() -> None:

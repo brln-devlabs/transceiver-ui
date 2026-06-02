@@ -3434,10 +3434,9 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                         "item_id": item_id,
                         "world_point": world_point_for_filter,
                         "color": color,
-                        "is_metric_candidate": color == MULTI_SELECTION_ECHO_DOT_OVERLAP_COLOR,
                     }
                 )
-            if color == MULTI_SELECTION_ECHO_DOT_OVERLAP_COLOR and world_point_for_filter is not None:
+            if world_point_for_filter is not None:
                 self._last_visible_red_echo_probability_world_points.append(world_point_for_filter)
             drawn_points += 1
         if MULTI_SELECTION_PROBABILITY_DEBUG_LOG:
@@ -4023,6 +4022,18 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             residual_rmse_m=float(math.sqrt(np.mean(finite_residuals * finite_residuals))),
         )
 
+
+    @staticmethod
+    def _is_echo_probability_metric_world_point(value: Any) -> bool:
+        if not isinstance(value, tuple) or len(value) != 2:
+            return False
+        try:
+            x = float(value[0])
+            y = float(value[1])
+        except (TypeError, ValueError):
+            return False
+        return math.isfinite(x) and math.isfinite(y)
+
     def _echo_heatmap_outlier_band_half_width_m(self) -> float:
         line_width_cm = self._echo_heatmap_imaginary_line_width_cm()
         if not math.isfinite(line_width_cm) or line_width_cm <= 0.0:
@@ -4043,7 +4054,8 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 [
                     entry["world_point"]
                     for entry in visible_points
-                    if isinstance(entry, dict) and entry.get("is_metric_candidate")
+                    if isinstance(entry, dict)
+                    and self._is_echo_probability_metric_world_point(entry.get("world_point"))
                 ],
                 0,
             )
@@ -4056,20 +4068,14 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             if not isinstance(entry, dict):
                 continue
             world_point = entry.get("world_point")
-            if (
-                not isinstance(world_point, tuple)
-                or len(world_point) != 2
-                or not math.isfinite(float(world_point[0]))
-                or not math.isfinite(float(world_point[1]))
-            ):
+            if not self._is_echo_probability_metric_world_point(world_point):
                 continue
             residuals = _lidar_line_residuals([world_point], slope=slope, intercept=intercept)
             if residuals.size == 0 or not math.isfinite(float(residuals[0])):
                 continue
             residual = abs(float(residuals[0]))
             if residual <= half_width_m:
-                if entry.get("is_metric_candidate"):
-                    kept_metric_points.append(world_point)
+                kept_metric_points.append(world_point)
                 continue
             outlier_count += 1
             item_id = entry.get("item_id")
