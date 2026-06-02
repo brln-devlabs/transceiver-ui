@@ -18,6 +18,7 @@ from typing import Any, Callable
 
 import customtkinter as ctk
 import numpy as np
+from PIL import Image, ImageDraw, ImageFont, ImageTk
 
 from .app_config import MissionRuntimeConfig
 from .measurement_mission import MapConfig, MeasurementMission, MeasurementPoint, measurement_mission_from_dict
@@ -537,35 +538,43 @@ class _ManualPromptNavigator:
 
 class MissionWorkflowWindow(ctk.CTkToplevel):
     @staticmethod
-    def _create_circle_photo_image(
+    def _create_echo_heading_label_image(
         color: str,
+        label: str,
         *,
         master: tk.Misc | None = None,
-        size: int = ECHO_HEADING_CIRCLE_SIZE_PX,
-    ) -> tk.PhotoImage:
-        image = tk.PhotoImage(master=master, width=size, height=size)
-        center = (size - 1) / 2.0
-        radius = size / 2.0 - 1.0
-        radius_squared = radius * radius
-        for y in range(size):
-            x_start: int | None = None
-            for x in range(size):
-                dx = x - center
-                dy = y - center
-                if dx * dx + dy * dy <= radius_squared:
-                    if x_start is None:
-                        x_start = x
-                elif x_start is not None:
-                    image.put(color, to=(x_start, y, x, y + 1))
-                    x_start = None
-            if x_start is not None:
-                image.put(color, to=(x_start, y, size, y + 1))
-        return image
+        dot_size: int = ECHO_HEADING_CIRCLE_SIZE_PX,
+    ) -> ImageTk.PhotoImage:
+        font = ImageFont.load_default()
+        text_bbox = font.getbbox(label)
+        text_width = text_bbox[2] - text_bbox[0]
+        text_height = text_bbox[3] - text_bbox[1]
+        gap = 4
+        padding_x = 1
+        padding_y = 1
+        width = padding_x * 2 + dot_size + gap + text_width
+        height = padding_y * 2 + max(dot_size, text_height)
 
-    def _create_echo_heading_images(self) -> tuple[tk.PhotoImage, ...]:
+        image = Image.new("RGBA", (width, height), (255, 255, 255, 0))
+        draw = ImageDraw.Draw(image)
+        dot_top = (height - dot_size) // 2
+        draw.ellipse(
+            (padding_x, dot_top, padding_x + dot_size - 1, dot_top + dot_size - 1),
+            fill=color,
+        )
+        text_x = padding_x + dot_size + gap - text_bbox[0]
+        text_y = (height - text_height) // 2 - text_bbox[1]
+        draw.text((text_x, text_y), label, fill="#111827", font=font)
+        return ImageTk.PhotoImage(image, master=master)
+
+    def _create_echo_heading_images(self) -> tuple[ImageTk.PhotoImage, ...]:
         return tuple(
-            self._create_circle_photo_image(color, master=self.results_table)
-            for color in ECHO_OVERLAY_COLORS
+            self._create_echo_heading_label_image(
+                color,
+                f"E{index + 1}",
+                master=self.results_table,
+            )
+            for index, color in enumerate(ECHO_OVERLAY_COLORS)
         )
 
     def __init__(self, parent: ctk.CTk) -> None:
@@ -1240,8 +1249,8 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             for index, image in enumerate(self._echo_heading_images[:5])
         }
         for key, title in headings.items():
-            heading_options: dict[str, Any] = {"text": title}
             image = echo_heading_images.get(key)
+            heading_options: dict[str, Any] = {"text": "" if image is not None else title}
             if image is not None:
                 heading_options.update({"image": image})
             self.results_table.heading(key, **heading_options)
