@@ -3459,8 +3459,15 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         if not math.isfinite(imaginary_line_width_cm) or imaginary_line_width_cm <= 0.0:
             imaginary_line_width_cm = 0.5
         scale_x, scale_y = getattr(self, "_map_preview_scale", (1.0, 1.0))
-        preview_scale = max(0.01, (abs(float(scale_x)) + abs(float(scale_y))) / 2.0)
+        offset_x, offset_y = getattr(self, "_map_preview_offset", (0.0, 0.0))
         line_width_m = imaginary_line_width_cm / 100.0
+        if not math.isfinite(line_width_m) or line_width_m <= 0.0:
+            line_width_m = 0.005
+        preview_compat_mode = (
+            "_build_echo_overlay_preview_points" in getattr(self, "__dict__", {})
+            and "_build_echo_overlay_world_points" not in getattr(self, "__dict__", {})
+        )
+        preview_scale = max(0.01, (abs(float(scale_x)) + abs(float(scale_y))) / 2.0)
         imaginary_line_width_px = max(0.5, (line_width_m / resolution) * preview_scale)
         candidate_count = 0
         sampled_point_count = 0
@@ -3488,22 +3495,43 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             if not echo_distances:
                 continue
             for echo_distance in echo_distances:
-                preview_points, _line_width = self._build_echo_overlay_preview_points(
-                    rx_position=rx_position,
-                    measurement_position=measurement_position,
-                    echo_distance_m=echo_distance,
-                    sample_levels=MULTI_SELECTION_ECHO_DOT_SAMPLE_LEVELS,
-                )
-                if preview_points is None:
-                    continue
+                if preview_compat_mode:
+                    preview_points, _line_width = self._build_echo_overlay_preview_points(
+                        rx_position=rx_position,
+                        measurement_position=measurement_position,
+                        echo_distance_m=echo_distance,
+                        sample_levels=MULTI_SELECTION_ECHO_DOT_SAMPLE_LEVELS,
+                    )
+                    if preview_points is None:
+                        continue
+                    point_iter = (
+                        (float(px), float(py), None)
+                        for px, py in zip(preview_points[0::2], preview_points[1::2])
+                    )
+                else:
+                    world_points = self._build_echo_overlay_world_points(
+                        rx_position=rx_position,
+                        measurement_position=measurement_position,
+                        echo_distance_m=echo_distance,
+                        sample_levels=MULTI_SELECTION_ECHO_DOT_SAMPLE_LEVELS,
+                    )
+                    if world_points is None:
+                        continue
+                    point_iter = (
+                        (float(wx), float(wy), (float(wx), float(wy)))
+                        for wx, wy in world_points
+                    )
                 candidate_count += 1
                 seen_cells_for_ellipse: set[tuple[int, int]] = set()
-                point_pairs = zip(preview_points[0::2], preview_points[1::2])
-                for px, py in point_pairs:
-                    if not math.isfinite(px) or not math.isfinite(py):
+                for coord_x, coord_y, world_point in point_iter:
+                    if not math.isfinite(coord_x) or not math.isfinite(coord_y):
                         continue
+                    if world_point is None:
+                        try:
+                            world_point = self._preview_pixel_to_world(preview_x=coord_x, preview_y=coord_y)
+                        except Exception:
+                            world_point = None
                     if overlay_point is not None:
-                        world_point = self._preview_pixel_to_world(preview_x=px, preview_y=py)
                         if world_point is None:
                             continue
                         if not self._is_world_point_inside_antenna_opening(
@@ -3514,8 +3542,16 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                         ):
                             continue
                     cell = (
-                        int(round(px / imaginary_line_width_px)),
-                        int(round(py / imaginary_line_width_px)),
+                        (
+                            int(round(coord_x / imaginary_line_width_px))
+                            if preview_compat_mode
+                            else int(round(coord_x / line_width_m))
+                        ),
+                        (
+                            int(round(coord_y / imaginary_line_width_px))
+                            if preview_compat_mode
+                            else int(round(coord_y / line_width_m))
+                        ),
                     )
                     if cell in seen_cells_for_ellipse:
                         continue
@@ -3529,10 +3565,11 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                             "samples": 0,
                             "ellipses": set(),
                             "positions": set(),
+                            "preview_space": preview_compat_mode,
                         },
                     )
-                    bucket["x"] += float(px)
-                    bucket["y"] += float(py)
+                    bucket["x"] += coord_x
+                    bucket["y"] += coord_y
                     bucket["samples"] += 1
                     bucket["ellipses"].add(candidate_count)
                     bucket["positions"].add(
@@ -3553,18 +3590,29 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             max_overlap = max(max_overlap, position_count)
             if position_count < self._echo_heatmap_min_visible_overlap():
                 continue
-            center_x = float(bucket["x"]) / sample_count
-            center_y = float(bucket["y"]) / sample_count
+            coord_x = float(bucket["x"]) / sample_count
+            coord_y = float(bucket["y"]) / sample_count
+            if bool(bucket.get("preview_space")):
+                center_x = coord_x
+                center_y = coord_y
+                try:
+                    world_point = self._preview_pixel_to_world(preview_x=center_x, preview_y=center_y)
+                except Exception:
+                    world_point = None
+            else:
+                world_x = coord_x
+                world_y = coord_y
+                world_point = (world_x, world_y)
+                map_pixel = self._world_to_map_pixel(x=world_x, y=world_y, image_height=original.height())
+                if map_pixel is None:
+                    continue
+                center_x = map_pixel[0] * scale_x + offset_x
+                center_y = map_pixel[1] * scale_y + offset_y
             radius = min(
                 MULTI_SELECTION_ECHO_DOT_MAX_RADIUS_PX,
                 MULTI_SELECTION_ECHO_DOT_BASE_RADIUS_PX
                 + ((position_count - 1) * MULTI_SELECTION_ECHO_DOT_OVERLAP_RADIUS_STEP_PX),
             )
-            world_point = None
-            try:
-                world_point = self._preview_pixel_to_world(preview_x=center_x, preview_y=center_y)
-            except Exception:
-                world_point = None
             is_lidar_outlier = (
                 world_point is not None
                 and self._is_radar_point_outside_lidar_band(
@@ -3783,6 +3831,83 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         delta = math.atan2(math.sin(point_angle - yaw), math.cos(point_angle - yaw))
         return abs(delta) <= half_angle_rad
 
+    def _build_echo_overlay_world_points(
+        self,
+        *,
+        rx_position: tuple[float, float],
+        measurement_position: tuple[float, float],
+        echo_distance_m: float,
+        sample_levels: tuple[int, int, int] = LIVE_ECHO_SAMPLING_NORMAL,
+        antenna_origin: tuple[float, float] | None = None,
+        antenna_yaw: float | None = None,
+        antenna_half_angle_rad: float | None = None,
+    ) -> list[tuple[float, float]] | None:
+        mission = self._mission
+        original = self._map_image_original
+        if mission is None or mission.map_config is None or original is None:
+            return None
+        resolution = mission.map_config.resolution
+        if not math.isfinite(resolution) or resolution <= 0.0:
+            return None
+        rx_x, rx_y = rx_position
+        point_x, point_y = measurement_position
+        if (
+            not math.isfinite(rx_x)
+            or not math.isfinite(rx_y)
+            or not math.isfinite(point_x)
+            or not math.isfinite(point_y)
+            or not math.isfinite(echo_distance_m)
+            or echo_distance_m < 0.0
+        ):
+            return None
+        distance_rx_to_point = math.hypot(point_x - rx_x, point_y - rx_y)
+        ellipse_axes = _compute_bistatic_echo_ellipse_axes(
+            distance_rx_to_point=distance_rx_to_point,
+            echo_distance_m=echo_distance_m,
+        )
+        if ellipse_axes is None:
+            return None
+        _semi_focal_distance, semi_major_axis, semi_minor_axis = ellipse_axes
+        if semi_minor_axis <= 0.0:
+            return None
+        ellipse_size_map_px = semi_major_axis / resolution
+        small_samples, medium_samples, large_samples = sample_levels
+        if ellipse_size_map_px < 40.0:
+            samples = small_samples
+        elif ellipse_size_map_px < 130.0:
+            samples = medium_samples
+        else:
+            samples = large_samples
+        unit_circle_points = self._ellipse_unit_circle_points(samples=samples)
+        center_x = (rx_x + point_x) / 2.0
+        center_y = (rx_y + point_y) / 2.0
+        angle = math.atan2(point_y - rx_y, point_x - rx_x)
+        cos_angle = math.cos(angle)
+        sin_angle = math.sin(angle)
+        filter_by_opening = (
+            antenna_origin is not None
+            and isinstance(antenna_yaw, (int, float))
+            and isinstance(antenna_half_angle_rad, (int, float))
+        )
+        world_points: list[tuple[float, float]] = []
+        for unit_cos, unit_sin in unit_circle_points:
+            local_x = semi_major_axis * unit_cos
+            local_y = semi_minor_axis * unit_sin
+            world_x = center_x + local_x * cos_angle - local_y * sin_angle
+            world_y = center_y + local_x * sin_angle + local_y * cos_angle
+            if filter_by_opening and not self._is_world_point_inside_antenna_opening(
+                origin=antenna_origin,
+                yaw=float(antenna_yaw),
+                target=(world_x, world_y),
+                half_angle_rad=float(antenna_half_angle_rad),
+            ):
+                world_points.append((math.nan, math.nan))
+                continue
+            world_points.append((world_x, world_y))
+        if sum(1 for world_x, world_y in world_points if math.isfinite(world_x) and math.isfinite(world_y)) < 3:
+            return None
+        return world_points
+
     def _build_echo_overlay_preview_points(
         self,
         *,
@@ -3798,80 +3923,30 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         original = self._map_image_original
         if mission is None or mission.map_config is None or original is None:
             return (None, 1)
-        resolution = mission.map_config.resolution
-        if not math.isfinite(resolution) or resolution <= 0.0:
-            return (None, 1)
-        rx_x, rx_y = rx_position
-        point_x, point_y = measurement_position
-        if (
-            not math.isfinite(rx_x)
-            or not math.isfinite(rx_y)
-            or not math.isfinite(point_x)
-            or not math.isfinite(point_y)
-            or not math.isfinite(echo_distance_m)
-            or echo_distance_m < 0.0
-        ):
-            return (None, 1)
-        distance_rx_to_point = math.hypot(point_x - rx_x, point_y - rx_y)
-        ellipse_axes = _compute_bistatic_echo_ellipse_axes(
-            distance_rx_to_point=distance_rx_to_point,
+        world_points = self._build_echo_overlay_world_points(
+            rx_position=rx_position,
+            measurement_position=measurement_position,
             echo_distance_m=echo_distance_m,
+            sample_levels=sample_levels,
+            antenna_origin=antenna_origin,
+            antenna_yaw=antenna_yaw,
+            antenna_half_angle_rad=antenna_half_angle_rad,
         )
-        if ellipse_axes is None:
-            return (None, 1)
-        semi_focal_distance, semi_major_axis, semi_minor_axis = ellipse_axes
-        if semi_minor_axis <= 0.0:
+        if world_points is None:
             return (None, 1)
         image_height = original.height()
         scale_x, scale_y = getattr(self, "_map_preview_scale", (1.0, 1.0))
         offset_x, offset_y = self._map_preview_offset
-        preview_scale_factor = (abs(scale_x) + abs(scale_y)) / 2.0
-        if not math.isfinite(preview_scale_factor) or preview_scale_factor <= 0.0:
-            preview_scale_factor = 1.0
-        ellipse_size_px = (semi_major_axis / resolution) * preview_scale_factor
-        small_samples, medium_samples, large_samples = sample_levels
-        if ellipse_size_px < 40.0:
-            samples = small_samples
-        elif ellipse_size_px < 130.0:
-            samples = medium_samples
-        else:
-            samples = large_samples
-        unit_circle_points = self._ellipse_unit_circle_points(samples=samples)
-        center_x = (rx_x + point_x) / 2.0
-        center_y = (rx_y + point_y) / 2.0
-        angle = math.atan2(point_y - rx_y, point_x - rx_x)
-        cos_angle = math.cos(angle)
-        sin_angle = math.sin(angle)
         preview_points: list[float] = []
-        filter_by_opening = (
-            antenna_origin is not None
-            and isinstance(antenna_yaw, (int, float))
-            and isinstance(antenna_half_angle_rad, (int, float))
-        )
-        for unit_cos, unit_sin in unit_circle_points:
-            local_x = semi_major_axis * unit_cos
-            local_y = semi_minor_axis * unit_sin
-            world_x = center_x + local_x * cos_angle - local_y * sin_angle
-            world_y = center_y + local_x * sin_angle + local_y * cos_angle
-            if filter_by_opening and not self._is_world_point_inside_antenna_opening(
-                origin=antenna_origin,
-                yaw=float(antenna_yaw),
-                target=(world_x, world_y),
-                half_angle_rad=float(antenna_half_angle_rad),
-            ):
+        for world_x, world_y in world_points:
+            if not math.isfinite(world_x) or not math.isfinite(world_y):
                 preview_points.extend((math.nan, math.nan))
                 continue
             map_pixel = self._world_to_map_pixel(x=world_x, y=world_y, image_height=image_height)
             if map_pixel is None:
-                if filter_by_opening:
-                    preview_points.extend((math.nan, math.nan))
+                preview_points.extend((math.nan, math.nan))
                 continue
-            preview_points.extend(
-                (
-                    map_pixel[0] * scale_x + offset_x,
-                    map_pixel[1] * scale_y + offset_y,
-                )
-            )
+            preview_points.extend((map_pixel[0] * scale_x + offset_x, map_pixel[1] * scale_y + offset_y))
         if sum(1 for value in preview_points if math.isfinite(value)) < 6:
             return (None, 1)
         return (preview_points, ECHO_OVERLAY_LINE_WIDTH_PX)
