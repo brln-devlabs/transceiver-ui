@@ -540,6 +540,55 @@ def test_draw_selected_echo_probability_overlay_aggregates_all_echo_distances() 
     assert len(window.map_preview_canvas.ovals) == 3
 
 
+def test_draw_selected_echo_probability_overlay_uses_configured_echo_count() -> None:
+    class FakeCanvas:
+        def __init__(self) -> None:
+            self.ovals: list[tuple[tuple[float, ...], dict[str, object]]] = []
+
+        def create_oval(self, *coords: float, **kwargs: object) -> int:
+            self.ovals.append((coords, kwargs))
+            return len(self.ovals)
+
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    window._mission = SimpleNamespace(map_config=SimpleNamespace(resolution=1.0))
+    window._map_image_original = SimpleNamespace(height=lambda: 100)
+    window.map_preview_canvas = FakeCanvas()
+    window.echo_heatmap_min_visible_overlap_var = SimpleNamespace(get=lambda: "1")
+    window.echo_heatmap_imaginary_line_width_var = SimpleNamespace(get=lambda: "5")
+    window.echo_heatmap_aggregated_echo_count_var = SimpleNamespace(get=lambda: "2")
+    window._append_validation = lambda _message: None
+    records = [
+        {
+            "live_position_at_measurement": {"x": 0.0, "y": 0.0},
+            "measurement": {
+                "result": {
+                    "echo_delays": [
+                        {"distance_m": 1.0},
+                        {"distance_m": 2.0},
+                        {"distance_m": 3.0},
+                    ]
+                }
+            },
+        }
+    ]
+    used_distances: list[float] = []
+
+    def fake_preview_points(**kwargs: object) -> tuple[list[float] | None, int]:
+        echo_distance_m = float(kwargs["echo_distance_m"])
+        used_distances.append(echo_distance_m)
+        return ([10.0 * echo_distance_m, 10.0], 1)
+
+    window._build_echo_overlay_preview_points = fake_preview_points
+
+    drawn = window._draw_selected_echo_probability_overlay(
+        rx_position=(0.0, 0.0),
+        records=records,
+    )
+
+    assert drawn is True
+    assert used_distances == [1.0, 2.0]
+    assert len(window.map_preview_canvas.ovals) == 2
+
 def test_draw_selected_echo_probability_overlay_scales_overlapping_point_radius() -> None:
     class FakeCanvas:
         def __init__(self) -> None:
@@ -673,6 +722,7 @@ def test_workflow_state_payload_persists_echo_heatmap_settings() -> None:
     window.live_preview_enabled_var = SimpleNamespace(get=lambda: False)
     window.echo_heatmap_imaginary_line_width_var = SimpleNamespace(get=lambda: "6.5")
     window.echo_heatmap_min_visible_overlap_var = SimpleNamespace(get=lambda: "7")
+    window.echo_heatmap_aggregated_echo_count_var = SimpleNamespace(get=lambda: "3")
     window.echo_heatmap_evaluation_visible_var = SimpleNamespace(get=lambda: False)
     window.echo_heatmap_ellipses_visible_var = SimpleNamespace(get=lambda: True)
     window.echo_heatmap_lidar_points_visible_var = SimpleNamespace(get=lambda: False)
@@ -685,6 +735,7 @@ def test_workflow_state_payload_persists_echo_heatmap_settings() -> None:
 
     assert payload["echo_heatmap_imaginary_line_width_cm"] == 6.5
     assert payload["echo_heatmap_min_visible_overlap"] == 7
+    assert payload["echo_heatmap_aggregated_echo_count"] == 3
     assert payload["echo_heatmap_evaluation_visible"] is False
     assert payload["echo_heatmap_ellipses_visible"] is True
     assert payload["echo_heatmap_lidar_points_visible"] is False
