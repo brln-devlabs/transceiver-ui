@@ -84,6 +84,7 @@ MULTI_SELECTION_ECHO_DOT_OUTLIER_COLOR = "#9E9E9E"
 RADAR_OUTLIER_BAND_WIDTH_CM = 20.0
 MULTI_SELECTION_ECHO_DOT_SAMPLE_LEVELS = (96, 160, 240)
 MULTI_SELECTION_ECHO_DOT_MIN_VISIBLE_OVERLAP = 5
+MULTI_SELECTION_ECHO_DOT_MAX_AGGREGATED_ECHOS = 5
 MULTI_SELECTION_ECHO_DOT_ANTENNA_OPENING_ANGLE_DEG = 360.0
 MULTI_SELECTION_PROBABILITY_DEBUG_LOG = True
 RESULTS_TABLE_EMPTY_ROW_IID = "__results_table_empty_row__"
@@ -632,6 +633,9 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self.echo_heatmap_min_visible_overlap_var = tk.StringVar(
             value=str(MULTI_SELECTION_ECHO_DOT_MIN_VISIBLE_OVERLAP)
         )
+        self.echo_heatmap_aggregated_echo_count_var = tk.StringVar(
+            value=str(MULTI_SELECTION_ECHO_DOT_MAX_AGGREGATED_ECHOS)
+        )
         self.echo_heatmap_antenna_opening_angle_deg_var = tk.StringVar(
             value=f"{MULTI_SELECTION_ECHO_DOT_ANTENNA_OPENING_ANGLE_DEG:g}"
         )
@@ -680,6 +684,19 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             value,
             default=MULTI_SELECTION_ECHO_DOT_MIN_VISIBLE_OVERLAP,
         )
+
+    def _echo_heatmap_aggregated_echo_count(self) -> int:
+        variable = getattr(self, "echo_heatmap_aggregated_echo_count_var", None)
+        value = (
+            variable.get()
+            if variable is not None
+            else MULTI_SELECTION_ECHO_DOT_MAX_AGGREGATED_ECHOS
+        )
+        parsed = _parse_positive_int(
+            value,
+            default=MULTI_SELECTION_ECHO_DOT_MAX_AGGREGATED_ECHOS,
+        )
+        return min(MULTI_SELECTION_ECHO_DOT_MAX_AGGREGATED_ECHOS, max(1, parsed))
 
     def _on_echo_heatmap_settings_changed(self) -> None:
         if getattr(self, "_is_restoring_workflow_state", False):
@@ -977,6 +994,9 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self.echo_heatmap_min_visible_overlap_var.trace_add(
             "write", lambda *_args: self._on_echo_heatmap_settings_changed()
         )
+        self.echo_heatmap_aggregated_echo_count_var.trace_add(
+            "write", lambda *_args: self._on_echo_heatmap_settings_changed()
+        )
         self.echo_heatmap_antenna_opening_angle_deg_var.trace_add(
             "write", lambda *_args: self._on_echo_heatmap_settings_changed()
         )
@@ -1122,14 +1142,24 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             validate="key",
             validatecommand=(self.register(self._validate_positive_integer_input), "%P"),
         ).grid(row=1, column=7, padx=(0, 6), pady=(6, 0), sticky="w")
+        ctk.CTkLabel(rx_position_controls, text="Anzahl Echos").grid(
+            row=1, column=8, padx=(6, 4), pady=(6, 0), sticky="w"
+        )
+        ctk.CTkOptionMenu(
+            rx_position_controls,
+            values=[str(value) for value in range(1, MULTI_SELECTION_ECHO_DOT_MAX_AGGREGATED_ECHOS + 1)],
+            variable=self.echo_heatmap_aggregated_echo_count_var,
+            width=80,
+            command=lambda _value: self._on_echo_heatmap_settings_changed(),
+        ).grid(row=1, column=9, padx=(0, 6), pady=(6, 0), sticky="w")
         ctk.CTkCheckBox(
             rx_position_controls,
             text="Ausreißer entfernen",
             variable=self.radar_outlier_removal_enabled_var,
             command=self._on_echo_heatmap_settings_changed,
-        ).grid(row=1, column=8, padx=(6, 4), pady=(6, 0), sticky="w")
+        ).grid(row=1, column=10, padx=(6, 4), pady=(6, 0), sticky="w")
         ctk.CTkLabel(rx_position_controls, text="Breite cm").grid(
-            row=1, column=9, padx=(0, 4), pady=(6, 0), sticky="w"
+            row=1, column=11, padx=(0, 4), pady=(6, 0), sticky="w"
         )
         ctk.CTkEntry(
             rx_position_controls,
@@ -1137,7 +1167,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             width=80,
             validate="key",
             validatecommand=(self.register(self._validate_positive_float_input), "%P"),
-        ).grid(row=1, column=10, padx=(0, 6), pady=(6, 0), sticky="w")
+        ).grid(row=1, column=12, padx=(0, 6), pady=(6, 0), sticky="w")
 
         side_panel = ctk.CTkFrame(map_controls_row)
         side_panel.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
@@ -2382,6 +2412,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             getattr(self, "_lidar_measurement_area_drag_current_world", None),
             self._echo_heatmap_imaginary_line_width_cm(),
             self._echo_heatmap_min_visible_overlap(),
+            self._echo_heatmap_aggregated_echo_count(),
             self._echo_heatmap_evaluation_visible(),
             self._echo_heatmap_ellipses_visible(),
             self._echo_heatmap_lidar_points_visible(),
@@ -3452,7 +3483,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             echo_delay_entries = result.get("echo_delays")
             echo_distances = self._extract_echo_distances(
                 echo_delay_entries,
-                limit=len(echo_delay_entries) if isinstance(echo_delay_entries, list) else 0,
+                limit=self._echo_heatmap_aggregated_echo_count(),
             )
             if not echo_distances:
                 continue
@@ -4896,6 +4927,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             "live_preview_enabled": bool(self.live_preview_enabled_var.get()),
             "echo_heatmap_imaginary_line_width_cm": self._echo_heatmap_imaginary_line_width_cm(),
             "echo_heatmap_min_visible_overlap": self._echo_heatmap_min_visible_overlap(),
+            "echo_heatmap_aggregated_echo_count": self._echo_heatmap_aggregated_echo_count(),
             "echo_heatmap_antenna_opening_angle_deg": self._echo_heatmap_antenna_opening_angle_deg(),
             "echo_heatmap_evaluation_visible": self._echo_heatmap_evaluation_visible(),
             "echo_heatmap_ellipses_visible": self._echo_heatmap_ellipses_visible(),
@@ -5011,6 +5043,17 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                     _parse_positive_int(
                         payload.get("echo_heatmap_min_visible_overlap"),
                         default=MULTI_SELECTION_ECHO_DOT_MIN_VISIBLE_OVERLAP,
+                    )
+                )
+            )
+            self.echo_heatmap_aggregated_echo_count_var.set(
+                str(
+                    min(
+                        MULTI_SELECTION_ECHO_DOT_MAX_AGGREGATED_ECHOS,
+                        _parse_positive_int(
+                            payload.get("echo_heatmap_aggregated_echo_count"),
+                            default=MULTI_SELECTION_ECHO_DOT_MAX_AGGREGATED_ECHOS,
+                        ),
                     )
                 )
             )
