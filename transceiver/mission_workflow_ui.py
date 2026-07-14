@@ -3449,59 +3449,64 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             result = measurement.get("result")
             if not isinstance(result, dict):
                 continue
-            echo_distances = self._extract_echo_distances(result.get("echo_delays"), limit=1)
+            echo_delay_entries = result.get("echo_delays")
+            echo_distances = self._extract_echo_distances(
+                echo_delay_entries,
+                limit=len(echo_delay_entries) if isinstance(echo_delay_entries, list) else 0,
+            )
             if not echo_distances:
                 continue
-            preview_points, _line_width = self._build_echo_overlay_preview_points(
-                rx_position=rx_position,
-                measurement_position=measurement_position,
-                echo_distance_m=echo_distances[0],
-                sample_levels=MULTI_SELECTION_ECHO_DOT_SAMPLE_LEVELS,
-            )
-            if preview_points is None:
-                continue
-            candidate_count += 1
-            seen_cells_for_ellipse: set[tuple[int, int]] = set()
-            point_pairs = zip(preview_points[0::2], preview_points[1::2])
-            for px, py in point_pairs:
-                if not math.isfinite(px) or not math.isfinite(py):
+            for echo_distance in echo_distances:
+                preview_points, _line_width = self._build_echo_overlay_preview_points(
+                    rx_position=rx_position,
+                    measurement_position=measurement_position,
+                    echo_distance_m=echo_distance,
+                    sample_levels=MULTI_SELECTION_ECHO_DOT_SAMPLE_LEVELS,
+                )
+                if preview_points is None:
                     continue
-                if overlay_point is not None:
-                    world_point = self._preview_pixel_to_world(preview_x=px, preview_y=py)
-                    if world_point is None:
+                candidate_count += 1
+                seen_cells_for_ellipse: set[tuple[int, int]] = set()
+                point_pairs = zip(preview_points[0::2], preview_points[1::2])
+                for px, py in point_pairs:
+                    if not math.isfinite(px) or not math.isfinite(py):
                         continue
-                    if not self._is_world_point_inside_antenna_opening(
-                        origin=(overlay_point.x, overlay_point.y),
-                        yaw=overlay_point.yaw,
-                        target=world_point,
-                        half_angle_rad=opening_half_angle_rad,
-                    ):
+                    if overlay_point is not None:
+                        world_point = self._preview_pixel_to_world(preview_x=px, preview_y=py)
+                        if world_point is None:
+                            continue
+                        if not self._is_world_point_inside_antenna_opening(
+                            origin=(overlay_point.x, overlay_point.y),
+                            yaw=overlay_point.yaw,
+                            target=world_point,
+                            half_angle_rad=opening_half_angle_rad,
+                        ):
+                            continue
+                    cell = (
+                        int(round(px / imaginary_line_width_px)),
+                        int(round(py / imaginary_line_width_px)),
+                    )
+                    if cell in seen_cells_for_ellipse:
                         continue
-                cell = (
-                    int(round(px / imaginary_line_width_px)),
-                    int(round(py / imaginary_line_width_px)),
-                )
-                if cell in seen_cells_for_ellipse:
-                    continue
-                seen_cells_for_ellipse.add(cell)
-                sampled_point_count += 1
-                bucket = ellipse_point_cells.setdefault(
-                    cell,
-                    {
-                        "x": 0.0,
-                        "y": 0.0,
-                        "samples": 0,
-                        "ellipses": set(),
-                        "positions": set(),
-                    },
-                )
-                bucket["x"] += float(px)
-                bucket["y"] += float(py)
-                bucket["samples"] += 1
-                bucket["ellipses"].add(candidate_count)
-                bucket["positions"].add(
-                    (float(measurement_position[0]), float(measurement_position[1]))
-                )
+                    seen_cells_for_ellipse.add(cell)
+                    sampled_point_count += 1
+                    bucket = ellipse_point_cells.setdefault(
+                        cell,
+                        {
+                            "x": 0.0,
+                            "y": 0.0,
+                            "samples": 0,
+                            "ellipses": set(),
+                            "positions": set(),
+                        },
+                    )
+                    bucket["x"] += float(px)
+                    bucket["y"] += float(py)
+                    bucket["samples"] += 1
+                    bucket["ellipses"].add(candidate_count)
+                    bucket["positions"].add(
+                        (float(measurement_position[0]), float(measurement_position[1]))
+                    )
         if not ellipse_point_cells:
             return False
         drawn_points = 0
