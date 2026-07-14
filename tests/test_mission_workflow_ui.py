@@ -2895,3 +2895,48 @@ def test_import_logs_appends_records_without_clearing_existing_results(tmp_path,
 
     assert cleared["called"] is False
     assert imported == [payload]
+
+
+def test_draw_selected_echo_probability_overlay_aggregates_in_world_space_across_preview_scales() -> None:
+    class FakeCanvas:
+        def __init__(self) -> None:
+            self.ovals: list[tuple[tuple[float, ...], dict[str, object]]] = []
+
+        def create_oval(self, *coords: float, **kwargs: object) -> int:
+            self.ovals.append((coords, kwargs))
+            return len(self.ovals)
+
+    def draw_for_scale(scale: float) -> list[tuple[float, float]]:
+        window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+        window._mission = SimpleNamespace(
+            map_config=SimpleNamespace(resolution=0.05, origin=(0.0, 0.0, 0.0))
+        )
+        window._map_image_original = SimpleNamespace(height=lambda: 200, width=lambda: 200)
+        window._map_preview_scale = (scale, scale)
+        window._map_preview_offset = (0.0, 0.0)
+        window._ellipse_unit_circle_cache = {}
+        window.map_preview_canvas = FakeCanvas()
+        window.echo_heatmap_min_visible_overlap_var = SimpleNamespace(get=lambda: "2")
+        window.echo_heatmap_imaginary_line_width_var = SimpleNamespace(get=lambda: "10")
+        window.echo_heatmap_aggregated_echo_count_var = SimpleNamespace(get=lambda: "1")
+        window._append_validation = lambda _message: None
+        records = [
+            {
+                "live_position_at_measurement": {"x": 2.0 + index * 0.03, "y": 2.0},
+                "measurement": {"result": {"echo_delays": [{"distance_m": 4.2}]},},
+            }
+            for index in range(2)
+        ]
+
+        drawn = window._draw_selected_echo_probability_overlay(rx_position=(0.0, 2.0), records=records)
+
+        assert drawn is True
+        assert window.map_preview_canvas.ovals
+        centers = []
+        for coords, _kwargs in window.map_preview_canvas.ovals:
+            center_x = ((coords[0] + coords[2]) / 2.0) / scale
+            center_y = ((coords[1] + coords[3]) / 2.0) / scale
+            centers.append((round(center_x, 6), round(center_y, 6)))
+        return sorted(centers)
+
+    assert draw_for_scale(1.0) == draw_for_scale(2.0)
