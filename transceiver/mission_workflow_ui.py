@@ -792,7 +792,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         }
         tk.Checkbutton(
             frame,
-            text="Radarmesspunkte",
+            text="geschätzte Reflektorpositionen",
             variable=self.echo_heatmap_evaluation_visible_var,
             command=self._on_echo_heatmap_settings_changed,
             **checkbutton_kwargs,
@@ -806,7 +806,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         ).grid(row=2, column=0, columnspan=2, sticky="ew", padx=8, pady=(0, 0))
         tk.Checkbutton(
             frame,
-            text="LiDAR-Messpunkte",
+            text="LiDAR-Referenzpositionen",
             variable=self.echo_heatmap_lidar_points_visible_var,
             command=self._on_echo_heatmap_settings_changed,
             **checkbutton_kwargs,
