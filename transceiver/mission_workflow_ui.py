@@ -643,6 +643,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self.echo_heatmap_ellipses_visible_var = tk.BooleanVar(value=False)
         self.echo_heatmap_lidar_points_visible_var = tk.BooleanVar(value=True)
         self.echo_heatmap_lidar_reference_line_visible_var = tk.BooleanVar(value=True)
+        self.map_axis_labels_visible_var = tk.BooleanVar(value=False)
         self.radar_outlier_removal_enabled_var = tk.BooleanVar(value=False)
         self.radar_outlier_band_width_cm_var = tk.StringVar(value=f"{RADAR_OUTLIER_BAND_WIDTH_CM:g}")
         self._echo_heatmap_settings_trace_pending = False
@@ -752,6 +753,12 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             return True
         return bool(variable.get())
 
+    def _map_axis_labels_visible(self) -> bool:
+        variable = getattr(self, "map_axis_labels_visible_var", None)
+        if variable is None:
+            return False
+        return bool(variable.get())
+
     def _radar_outlier_removal_enabled(self) -> bool:
         variable = getattr(self, "radar_outlier_removal_enabled_var", None)
         if variable is None:
@@ -834,7 +841,14 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             variable=self.echo_heatmap_lidar_reference_line_visible_var,
             command=self._on_echo_heatmap_settings_changed,
             **checkbutton_kwargs,
-        ).grid(row=4, column=0, columnspan=2, sticky="ew", padx=8, pady=(0, 6))
+        ).grid(row=4, column=0, columnspan=2, sticky="ew", padx=8, pady=(0, 0))
+        tk.Checkbutton(
+            frame,
+            text="Achsenbeschriftung",
+            variable=self.map_axis_labels_visible_var,
+            command=self._on_echo_heatmap_settings_changed,
+            **checkbutton_kwargs,
+        ).grid(row=5, column=0, columnspan=2, sticky="ew", padx=8, pady=(0, 6))
         return frame
 
     def _sync_echo_heatmap_settings_overlay(self, *, visible: bool) -> None:
@@ -1010,6 +1024,9 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             "write", lambda *_args: self._on_echo_heatmap_settings_changed()
         )
         self.echo_heatmap_lidar_reference_line_visible_var.trace_add(
+            "write", lambda *_args: self._on_echo_heatmap_settings_changed()
+        )
+        self.map_axis_labels_visible_var.trace_add(
             "write", lambda *_args: self._on_echo_heatmap_settings_changed()
         )
         self.radar_outlier_removal_enabled_var.trace_add(
@@ -2417,6 +2434,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             self._echo_heatmap_ellipses_visible(),
             self._echo_heatmap_lidar_points_visible(),
             self._echo_heatmap_lidar_reference_line_visible(),
+            self._map_axis_labels_visible(),
             self._radar_outlier_removal_enabled(),
             self._radar_outlier_band_width_cm(),
             self._pending_nav2point_world_position,
@@ -2461,8 +2479,141 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._draw_selected_lidar_reference_overlay(precomputed_estimate=lidar_wall_estimate_for_radar_filter)
         self._draw_selected_measurement_position_markers()
         self._draw_lidar_measurement_area_overlay()
+        self._draw_map_axis_labels_overlay()
         self._raise_selected_echo_probability_overlay()
         self._sync_echo_heatmap_settings_overlay(visible=True)
+
+    def _draw_map_axis_labels_overlay(self) -> None:
+        mission = self._mission
+        original = self._map_image_original
+        if (
+            not self._map_axis_labels_visible()
+            or mission is None
+            or mission.map_config is None
+            or original is None
+        ):
+            return
+
+        resolution = mission.map_config.resolution
+        if resolution <= 0.0:
+            return
+
+        origin_x, origin_y, _origin_yaw = mission.map_config.origin
+        min_x = origin_x
+        max_x = origin_x + (float(original.width()) * resolution)
+        min_y = origin_y
+        max_y = origin_y + (float(original.height()) * resolution)
+
+        scale_x, scale_y = getattr(self, "_map_preview_scale", (1.0, 1.0))
+        offset_x, offset_y = self._map_preview_offset
+        left = offset_x
+        right = offset_x + (float(original.width()) * scale_x)
+        top = offset_y
+        bottom = offset_y + (float(original.height()) * scale_y)
+
+        axis_color = "#f5f7ff"
+        label_bg = "#111827"
+        tick_length = 6.0
+
+        def _nice_tick_step(span: float) -> float:
+            if span <= 0.0 or not math.isfinite(span):
+                return 1.0
+            raw_step = span / 5.0
+            exponent = math.floor(math.log10(raw_step))
+            base = raw_step / (10.0 ** exponent)
+            if base <= 1.0:
+                nice_base = 1.0
+            elif base <= 2.0:
+                nice_base = 2.0
+            elif base <= 5.0:
+                nice_base = 5.0
+            else:
+                nice_base = 10.0
+            return nice_base * (10.0 ** exponent)
+
+        def _format_meters(value: float) -> str:
+            if abs(value) >= 100.0 or abs(value - round(value)) < 1e-6:
+                return f"{value:.0f} m"
+            if abs(value) >= 10.0:
+                return f"{value:.1f} m"
+            return f"{value:.2f} m"
+
+        def _draw_label(x: float, y: float, text: str, *, anchor: str) -> None:
+            text_id = self.map_preview_canvas.create_text(
+                x,
+                y,
+                text=text,
+                fill=axis_color,
+                font=("TkDefaultFont", 8),
+                anchor=anchor,
+            )
+            bbox = self.map_preview_canvas.bbox(text_id)
+            if bbox is None:
+                return
+            x1, y1, x2, y2 = bbox
+            box_id = self.map_preview_canvas.create_rectangle(
+                x1 - 2,
+                y1 - 2,
+                x2 + 2,
+                y2 + 2,
+                fill=label_bg,
+                outline="#374151",
+                width=1,
+            )
+            self.map_preview_canvas.tag_lower(box_id, text_id)
+
+        self.map_preview_canvas.create_line(left, bottom, right, bottom, fill=axis_color, width=1)
+        self.map_preview_canvas.create_line(left, bottom, left, top, fill=axis_color, width=1)
+        self.map_preview_canvas.create_text(
+            (left + right) / 2.0,
+            max(top + 14.0, bottom - 18.0),
+            text="x [m]",
+            fill=axis_color,
+            font=("TkDefaultFont", 9, "bold"),
+            anchor="s",
+        )
+        self.map_preview_canvas.create_text(
+            min(right - 10.0, left + 18.0),
+            (top + bottom) / 2.0,
+            text="y [m]",
+            fill=axis_color,
+            font=("TkDefaultFont", 9, "bold"),
+            angle=90,
+            anchor="n",
+        )
+
+        x_step = _nice_tick_step(max_x - min_x)
+        tick_x = math.ceil(min_x / x_step) * x_step
+        while tick_x <= max_x + (x_step * 0.5):
+            preview_x = left + (((tick_x - origin_x) / resolution) * scale_x)
+            if left - 0.5 <= preview_x <= right + 0.5:
+                self.map_preview_canvas.create_line(
+                    preview_x,
+                    bottom,
+                    preview_x,
+                    bottom - tick_length,
+                    fill=axis_color,
+                    width=1,
+                )
+                _draw_label(preview_x, bottom - tick_length - 4.0, _format_meters(tick_x), anchor="s")
+            tick_x += x_step
+
+        y_step = _nice_tick_step(max_y - min_y)
+        tick_y = math.ceil(min_y / y_step) * y_step
+        while tick_y <= max_y + (y_step * 0.5):
+            map_pixel_y = float(original.height()) - ((tick_y - origin_y) / resolution)
+            preview_y = top + (map_pixel_y * scale_y)
+            if top - 0.5 <= preview_y <= bottom + 0.5:
+                self.map_preview_canvas.create_line(
+                    left,
+                    preview_y,
+                    left + tick_length,
+                    preview_y,
+                    fill=axis_color,
+                    width=1,
+                )
+                _draw_label(left + tick_length + 4.0, preview_y, _format_meters(tick_y), anchor="w")
+            tick_y += y_step
 
     def _draw_live_overlay_layer(self) -> None:
         self._draw_live_echo_preview_overlay()
@@ -5008,6 +5159,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             "echo_heatmap_ellipses_visible": self._echo_heatmap_ellipses_visible(),
             "echo_heatmap_lidar_points_visible": self._echo_heatmap_lidar_points_visible(),
             "echo_heatmap_lidar_reference_line_visible": self._echo_heatmap_lidar_reference_line_visible(),
+            "map_axis_labels_visible": self._map_axis_labels_visible(),
             "radar_outlier_removal_enabled": self._radar_outlier_removal_enabled(),
             "radar_outlier_band_width_cm": self._radar_outlier_band_width_cm(),
             "records": self._records,
@@ -5150,6 +5302,9 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             )
             self.echo_heatmap_lidar_reference_line_visible_var.set(
                 bool(payload.get("echo_heatmap_lidar_reference_line_visible", True))
+            )
+            self.map_axis_labels_visible_var.set(
+                bool(payload.get("map_axis_labels_visible", False))
             )
             self.radar_outlier_removal_enabled_var.set(
                 bool(payload.get("radar_outlier_removal_enabled", False))
