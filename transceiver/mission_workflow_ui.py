@@ -2484,8 +2484,8 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         self._sync_echo_heatmap_settings_overlay(visible=True)
 
     def _draw_map_axis_labels_overlay(self) -> None:
-        mission = self._mission
-        original = self._map_image_original
+        mission = getattr(self, "_mission", None)
+        original = getattr(self, "_map_image_original", None)
         if (
             not self._map_axis_labels_visible()
             or mission is None
@@ -2512,6 +2512,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
         bottom = offset_y + (float(original.height()) * scale_y)
 
         axis_color = "#f5f7ff"
+        axis_title_color = "#000000"
         label_bg = "#111827"
         tick_length = 6.0
 
@@ -2564,29 +2565,16 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
 
         self.map_preview_canvas.create_line(left, bottom, right, bottom, fill=axis_color, width=1)
         self.map_preview_canvas.create_line(left, bottom, left, top, fill=axis_color, width=1)
-        self.map_preview_canvas.create_text(
-            (left + right) / 2.0,
-            max(top + 14.0, bottom - 18.0),
-            text="x [m]",
-            fill=axis_color,
-            font=("TkDefaultFont", 9, "bold"),
-            anchor="s",
-        )
-        self.map_preview_canvas.create_text(
-            min(right - 10.0, left + 18.0),
-            (top + bottom) / 2.0,
-            text="y [m]",
-            fill=axis_color,
-            font=("TkDefaultFont", 9, "bold"),
-            angle=90,
-            anchor="n",
-        )
+
+        x_tick_positions: list[float] = []
+        y_tick_positions: list[float] = []
 
         x_step = _nice_tick_step(max_x - min_x)
         tick_x = math.ceil(min_x / x_step) * x_step
         while tick_x <= max_x + (x_step * 0.5):
             preview_x = left + (((tick_x - origin_x) / resolution) * scale_x)
             if left - 0.5 <= preview_x <= right + 0.5:
+                x_tick_positions.append(preview_x)
                 self.map_preview_canvas.create_line(
                     preview_x,
                     bottom,
@@ -2604,6 +2592,7 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
             map_pixel_y = float(original.height()) - ((tick_y - origin_y) / resolution)
             preview_y = top + (map_pixel_y * scale_y)
             if top - 0.5 <= preview_y <= bottom + 0.5:
+                y_tick_positions.append(preview_y)
                 self.map_preview_canvas.create_line(
                     left,
                     preview_y,
@@ -2614,6 +2603,34 @@ class MissionWorkflowWindow(ctk.CTkToplevel):
                 )
                 _draw_label(left + tick_length + 4.0, preview_y, _format_meters(tick_y), anchor="w")
             tick_y += y_step
+
+        x_axis_label_x = (
+            (x_tick_positions[0] + x_tick_positions[1]) / 2.0
+            if len(x_tick_positions) >= 2
+            else (left + right) / 2.0
+        )
+        y_axis_label_y = (
+            (y_tick_positions[0] + y_tick_positions[1]) / 2.0
+            if len(y_tick_positions) >= 2
+            else (top + bottom) / 2.0
+        )
+        self.map_preview_canvas.create_text(
+            x_axis_label_x,
+            bottom - tick_length - 4.0,
+            text="x [m]",
+            fill=axis_title_color,
+            font=("TkDefaultFont", 9, "bold"),
+            anchor="s",
+        )
+        self.map_preview_canvas.create_text(
+            left + tick_length + 4.0,
+            y_axis_label_y,
+            text="y [m]",
+            fill=axis_title_color,
+            font=("TkDefaultFont", 9, "bold"),
+            angle=90,
+            anchor="center",
+        )
 
     def _draw_live_overlay_layer(self) -> None:
         self._draw_live_echo_preview_overlay()

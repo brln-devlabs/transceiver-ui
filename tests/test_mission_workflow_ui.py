@@ -2256,6 +2256,64 @@ def test_lidar_measurement_area_button_uses_checkmark_when_active() -> None:
     assert configured == ["✓"]
 
 
+def test_draw_map_axis_titles_are_black_and_between_first_tick_values() -> None:
+    window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
+    text_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    class CanvasStub:
+        def create_line(self, *args, **kwargs):
+            return None
+
+        def create_rectangle(self, *args, **kwargs):
+            return None
+
+        def create_text(self, *args, **kwargs):
+            text_calls.append((args, kwargs))
+            return len(text_calls)
+
+        def bbox(self, _item_id):
+            return (0, 0, 10, 10)
+
+        def tag_lower(self, *_args):
+            return None
+
+    window._mission = SimpleNamespace(
+        map_config=SimpleNamespace(resolution=1.0, origin=(0.0, 0.0, 0.0))
+    )
+    window._map_image_original = SimpleNamespace(width=lambda: 100, height=lambda: 100)
+    window._map_preview_scale = (1.0, 1.0)
+    window._map_preview_offset = (0.0, 0.0)
+    window._map_axis_labels_visible = lambda: True
+    window.map_preview_canvas = CanvasStub()
+
+    window._draw_map_axis_labels_overlay()
+
+    axis_title_calls = {
+        kwargs["text"]: (args, kwargs)
+        for args, kwargs in text_calls
+        if kwargs["text"] in {"x [m]", "y [m]"}
+    }
+    assert axis_title_calls["x [m]"] == (
+        (10.0, 90.0),
+        {
+            "text": "x [m]",
+            "fill": "#000000",
+            "font": ("TkDefaultFont", 9, "bold"),
+            "anchor": "s",
+        },
+    )
+    assert axis_title_calls["y [m]"] == (
+        (10.0, 90.0),
+        {
+            "text": "y [m]",
+            "fill": "#000000",
+            "font": ("TkDefaultFont", 9, "bold"),
+            "angle": 90,
+            "anchor": "center",
+        },
+    )
+
+
 def test_draw_lidar_measurement_area_overlay_uses_dark_blue_label() -> None:
     window = MissionWorkflowWindow.__new__(MissionWorkflowWindow)
     text_calls: list[dict[str, object]] = []
