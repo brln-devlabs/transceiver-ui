@@ -3327,7 +3327,7 @@ def _plot_on_pg(
         plot.plot(np.real(data), pen=pg.mkPen(colors["real"]), name="Real")
         plot.plot(
             np.imag(data),
-            pen=pg.mkPen(colors["imag"], style=QtCore.Qt.DashLine),
+            pen=pg.mkPen(colors["imag"], style=QtCore.Qt.PenStyle.DashLine),
             name="Imag",
         )
         plot.setTitle(title)
@@ -3401,7 +3401,7 @@ def _plot_on_pg(
             plot.plot(
                 lags2,
                 mag2,
-                pen=pg.mkPen(colors["compare"], style=QtCore.Qt.DashLine),
+                pen=pg.mkPen(colors["compare"], style=QtCore.Qt.PenStyle.DashLine),
                 name="ohne Pfad-Cancellation",
             )
         if legend is None:

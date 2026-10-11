@@ -115,7 +115,7 @@ def main():
         )
         p1.plot(
             np.imag(orig_plot),
-            pen=pg.mkPen(PLOT_COLORS["imag"], style=QtCore.Qt.DashLine),
+            pen=pg.mkPen(PLOT_COLORS["imag"], style=QtCore.Qt.PenStyle.DashLine),
             name="Imag",
         )
         p1.showGrid(x=True, y=True)
@@ -129,7 +129,7 @@ def main():
         )
         p2.plot(
             np.imag(proc_plot),
-            pen=pg.mkPen(PLOT_COLORS["imag"], style=QtCore.Qt.DashLine),
+            pen=pg.mkPen(PLOT_COLORS["imag"], style=QtCore.Qt.PenStyle.DashLine),
             name="Imag",
         )
         p2.showGrid(x=True, y=True)

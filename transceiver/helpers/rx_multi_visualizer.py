@@ -58,7 +58,7 @@ def main():
         p.showGrid(x=True, y=True)
         p.addLegend()
         p.plot(np.real(sig), pen=pg.mkPen(color), name=f"Ch {idx} I")
-        p.plot(np.imag(sig), pen=pg.mkPen(color, style=QtCore.Qt.DashLine),
+        p.plot(np.imag(sig), pen=pg.mkPen(color, style=QtCore.Qt.PenStyle.DashLine),
                name=f"Ch {idx} Q")
         p.setLabel('left', 'Amplitude')
         if idx == ch - 1:
