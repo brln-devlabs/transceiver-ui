@@ -66,7 +66,7 @@ def main():
     )
     win.plot(
         np.imag(rx_sig),
-        pen=pg.mkPen(PLOT_COLORS["imag"], style=QtCore.Qt.DashLine),
+        pen=pg.mkPen(PLOT_COLORS["imag"], style=QtCore.Qt.PenStyle.DashLine),
         name='Imaginärteil')
 
     pg.exec()
